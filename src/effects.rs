@@ -1,16 +1,25 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 use crate::{
-    panel_plugin::{WORKER_BALL_COUNT_MAX, WORKER_BALL_RADIUS},
-    participants,
+    battlefield::{RestartEvent, TileHitEvent},
+    panel_plugin::{
+        spawn_workers, WorkerBall, LEFT_ROOT_X, RIGHT_ROOT_X, WORKER_BALL_COUNT_MAX,
+        WORKER_BALL_RADIUS, WORKER_BALL_SPAWN_Y,
+    },
+    participants::{self, Participant, BALL_COLORS, TILE_COLORS},
 };
 use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
 
 // Constants {{{
 
-const HIT_PARTICLE_LIFETIME: f32 = 2.;
-const HIT_PARTICLE_SIZE: f32 = WORKER_BALL_RADIUS * 2.0;
-const HIT_PARTICLE_COUNT: f32 = 16.0;
-pub const HIT_PARTICLE_MAX_PER_SECOND: f32 = 1024.0;
+const HIT_PARTICLE_BUFFER_SIZE: u32 = 65536;
+const HIT_PARTICLE_SIZE: f32 = 1.25;
+const HIT_PARTICLE_LIFETIME: f32 = 1.5;
+const HIT_PARTICLE_COUNT: f32 = 12.0;
+pub const HIT_PARTICLE_MAX_PER_SECOND: f32 =
+    HIT_PARTICLE_BUFFER_SIZE as f32 / HIT_PARTICLE_LIFETIME / HIT_PARTICLE_COUNT;
+const TRAIL_PARTICLE_SIZE: f32 = WORKER_BALL_RADIUS * 2.0;
 const TRAIL_SPAWN_RATE: f32 = 60.;
 pub const TRAIL_LIFETIME: f32 = 0.5;
 pub const SPAWN_COLOR_PROPERTY: &str = "spawn_color";
@@ -22,26 +31,60 @@ const BULLET_VEL_PROPERTY: &str = "bullet_vel";
 pub struct EffectsPlugin;
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(HanabiPlugin).add_systems(
-            PreStartup,
-            (setup_tile_hit_effect, setup_trail_effect).after(participants::setup),
-        );
+        app.add_plugins(HanabiPlugin)
+            .add_systems(
+                PreStartup,
+                (setup_tile_hit_effect, setup_trail_effect).after(participants::setup),
+            )
+            .add_systems(
+                Update,
+                (
+                    (update_worker_trail_position, add_worker_trails)
+                        .chain()
+                        .before(spawn_workers),
+                    trigger_tile_hit_effect
+                        .run_if(on_event::<TileHitEvent>().or_else(on_event::<RestartEvent>())),
+                    restart.run_if(on_event::<RestartEvent>()),
+                ),
+            );
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-pub struct EffectsSystemSet;
 #[derive(Clone, Resource)]
-pub struct TileHitEffect(pub Handle<EffectAsset>);
+struct TileHitEffect(pub Handle<EffectAsset>);
 #[derive(Clone, Resource)]
-pub struct TrailEffect(pub Handle<EffectAsset>);
-#[derive(Clone, Component, Deref, DerefMut)]
-pub struct EffectLifetimeTimer(Timer);
-impl Default for EffectLifetimeTimer {
-    fn default() -> Self {
-        Self(Timer::from_seconds(
-            HIT_PARTICLE_LIFETIME + 0.2,
-            TimerMode::Once,
-        ))
+struct TrailEffect(pub Handle<EffectAsset>);
+#[derive(Component, Clone, Copy)]
+struct TileHitEffectSpawner;
+#[derive(Component, Clone, Copy)]
+struct WorkerBallTrail(pub Entity);
+#[derive(Component, Clone, Copy)]
+struct InactiveLeftWorkerBallTrail;
+#[derive(Component, Clone, Copy)]
+struct InactiveRightWorkerBallTrail;
+#[derive(Bundle, Clone)]
+struct WorkerBallTrailBundle {
+    // {{{
+    link: WorkerBallTrail,
+    peb: ParticleEffectBundle,
+    name: Name,
+}
+impl WorkerBallTrailBundle {
+    fn new(
+        target: Entity,
+        position: Vec3,
+        color: impl Into<LinearRgba>,
+        effect: Handle<EffectAsset>,
+    ) -> Self {
+        Self {
+            link: WorkerBallTrail(target),
+            peb: ParticleEffectBundle {
+                effect: ParticleEffect::new(effect),
+                effect_properties: EffectProperties::from_spawn_color(color)
+                    .with_position(position),
+                ..default()
+            },
+            name: Name::new("Worker Ball Trail"),
+        }
     }
 }
 fn setup_tile_hit_effect(mut commands: Commands, mut effects: ResMut<Assets<EffectAsset>>) {
@@ -72,7 +115,7 @@ fn setup_tile_hit_effect(mut commands: Commands, mut effects: ResMut<Assets<Effe
     let spawn_color = writer.add_property(SPAWN_COLOR_PROPERTY, 0xFFFFFFFFu32.into());
     let init_color = SetAttributeModifier::new(Attribute::COLOR, writer.prop(spawn_color).expr());
 
-    let gradient = Gradient::linear(Vec2::ONE, Vec2::ZERO);
+    let gradient = Gradient::linear(Vec2::splat(HIT_PARTICLE_SIZE), Vec2::ZERO);
 
     // On spawn, randomly initialize the position of the particle
     // to be over the surface of a sphere of radius 2 units.
@@ -98,22 +141,18 @@ fn setup_tile_hit_effect(mut commands: Commands, mut effects: ResMut<Assets<Effe
     let init_vel = SetAttributeModifier::new(Attribute::VELOCITY, vel.expr());
 
     let effect = effects.add(
-        EffectAsset::new(
-            vec![(HIT_PARTICLE_COUNT * HIT_PARTICLE_MAX_PER_SECOND * HIT_PARTICLE_LIFETIME) as u32],
-            spawner,
-            writer.finish(),
-        )
-        .with_name("tile hit")
-        .init(init_pos)
-        .init(init_vel)
-        .init(init_age)
-        .init(init_lifetime)
-        .init(init_color)
-        .update(update_drag)
-        .render(SizeOverLifetimeModifier {
-            gradient,
-            screen_space_size: false,
-        }),
+        EffectAsset::new(vec![HIT_PARTICLE_BUFFER_SIZE], spawner, writer.finish())
+            .with_name("tile hit")
+            .init(init_pos)
+            .init(init_vel)
+            .init(init_age)
+            .init(init_lifetime)
+            .init(init_color)
+            .update(update_drag)
+            .render(SizeOverLifetimeModifier {
+                gradient,
+                screen_space_size: false,
+            }),
     );
 
     commands.insert_resource(TileHitEffect(effect));
@@ -146,7 +185,7 @@ fn setup_trail_effect(mut commands: Commands, mut effects: ResMut<Assets<EffectA
 
     let init_size_attr = SetAttributeModifier {
         attribute: Attribute::SIZE,
-        value: writer.lit(HIT_PARTICLE_SIZE).expr(),
+        value: writer.lit(TRAIL_PARTICLE_SIZE).expr(),
     };
 
     let init_color = SetAttributeModifier {
@@ -171,7 +210,7 @@ fn setup_trail_effect(mut commands: Commands, mut effects: ResMut<Assets<EffectA
         .attr(Attribute::AGE)
         .div(writer.attr(Attribute::LIFETIME));
     let size = writer
-        .lit(HIT_PARTICLE_SIZE)
+        .lit(TRAIL_PARTICLE_SIZE)
         .mix(writer.lit(0.0), age_ratio.clone());
     let update_size_attr = SetAttributeModifier {
         attribute: Attribute::SIZE,
@@ -223,6 +262,148 @@ fn setup_trail_effect(mut commands: Commands, mut effects: ResMut<Assets<EffectA
 
     commands.insert_resource(TrailEffect(effects.add(effect)));
 }
+fn add_worker_trails(
+    mut commands: Commands,
+    mut left_trails: Query<
+        (Entity, &mut EffectProperties),
+        (
+            With<InactiveLeftWorkerBallTrail>,
+            Without<InactiveRightWorkerBallTrail>,
+        ),
+    >,
+    mut right_trails: Query<
+        (Entity, &mut EffectProperties),
+        (
+            With<InactiveRightWorkerBallTrail>,
+            Without<InactiveLeftWorkerBallTrail>,
+        ),
+    >,
+    workers: Query<(Entity, &GlobalTransform, &Participant), Added<WorkerBall>>,
+    effect: Res<TrailEffect>,
+) {
+    let mut left_trails = left_trails.iter_mut();
+    let mut right_trails = right_trails.iter_mut();
+    for (worker_entity, transform, &participant) in workers.iter() {
+        if let Some((trail_entity, mut trail_properties)) = match participant {
+            Participant::A | Participant::B => left_trails.next(),
+            Participant::C | Participant::D => right_trails.next(),
+        } {
+            commands
+                .entity(trail_entity)
+                .remove::<(InactiveLeftWorkerBallTrail, InactiveRightWorkerBallTrail)>()
+                .insert(WorkerBallTrail(worker_entity));
+            trail_properties.set_spawn_color(TILE_COLORS[participant]);
+            trail_properties.set_position(transform.translation());
+        } else {
+            commands.spawn(WorkerBallTrailBundle::new(
+                worker_entity,
+                transform.translation(),
+                TILE_COLORS[participant],
+                effect.0.clone(),
+            ));
+        }
+    }
+}
+fn update_worker_trail_position(
+    mut commands: Commands,
+    mut query: Query<((Entity, &WorkerBallTrail), &mut EffectProperties)>,
+    transform_query: Query<&GlobalTransform>,
+    mut go_left: Local<bool>,
+) {
+    for ((trail_entity, &WorkerBallTrail(ball_entity)), mut properties) in &mut query {
+        if let Ok(transform) = transform_query.get(ball_entity) {
+            properties.set_position(transform.translation());
+        } else {
+            // Despawning the particle effect causes immense lag for some reason,
+            // so instead we just leave it running but make it invisible
+            let mut trail = commands.entity(trail_entity);
+            if *go_left {
+                trail.insert(InactiveLeftWorkerBallTrail)
+            } else {
+                trail.insert(InactiveRightWorkerBallTrail)
+            }
+            .remove::<WorkerBallTrail>();
+            let x = if *go_left { LEFT_ROOT_X } else { RIGHT_ROOT_X };
+            properties.set_spawn_color(LinearRgba::NONE);
+            properties.set_position(Vec3::new(x, WORKER_BALL_SPAWN_Y, 0.0));
+            *go_left = !*go_left;
+        }
+    }
+}
+fn restart(
+    mut commands: Commands,
+    mut trails: Query<
+        (Entity, &mut EffectProperties),
+        Or<(
+            With<InactiveLeftWorkerBallTrail>,
+            With<InactiveRightWorkerBallTrail>,
+            With<WorkerBallTrail>,
+        )>,
+    >,
+) {
+    let mut go_left = false;
+    for (entity, mut properties) in trails.iter_mut() {
+        let x = if go_left { LEFT_ROOT_X } else { RIGHT_ROOT_X };
+        properties.set_spawn_color(LinearRgba::NONE);
+        properties.set_position(Vec3::new(x, WORKER_BALL_SPAWN_Y, 0.0));
+        let mut trail = commands.entity(entity);
+        trail.remove::<(
+            InactiveLeftWorkerBallTrail,
+            InactiveRightWorkerBallTrail,
+            WorkerBallTrail,
+        )>();
+        if go_left {
+            trail.insert(InactiveLeftWorkerBallTrail);
+        } else {
+            trail.insert(InactiveRightWorkerBallTrail);
+        }
+        go_left = !go_left;
+    }
+}
+fn trigger_tile_hit_effect(
+    mut commands: Commands,
+    mut tile_hit_events: EventReader<TileHitEvent>,
+    mut restart_event: EventReader<RestartEvent>,
+    mut effect_spawners: Query<
+        (&mut Transform, &mut EffectProperties, &mut EffectSpawner),
+        With<TileHitEffectSpawner>,
+    >,
+    effect: Res<TileHitEffect>,
+    time: Res<Time>,
+) {
+    if !restart_event.is_empty() {
+        tile_hit_events.clear();
+        restart_event.clear();
+    }
+    let mut spawners = effect_spawners.iter_mut();
+    // Maximum number of spawners left available this frame for tile hit particle effect.
+    let mut count = (time.delta_seconds() * HIT_PARTICLE_MAX_PER_SECOND).floor() as usize;
+    for tile_hit in tile_hit_events.read() {
+        if count == 0 {
+            return;
+        }
+        count -= 1;
+        if let Some((mut spawner_transform, mut properties, mut spawner)) = spawners.next() {
+            spawner_transform.translation = tile_hit.position;
+            properties.set_spawn_color(BALL_COLORS[tile_hit.participant]);
+            properties.set_bullet_vel(tile_hit.bullet_velocity);
+            spawner.reset();
+        } else {
+            commands.spawn((
+                TileHitEffectSpawner,
+                Name::new("Tile Hit Particle Spawner"),
+                ParticleEffectBundle {
+                    transform: Transform::from_translation(tile_hit.position),
+                    effect: ParticleEffect::new(effect.0.clone()),
+                    effect_properties: EffectProperties::from_spawn_color(
+                        BALL_COLORS[tile_hit.participant],
+                    ),
+                    ..default()
+                },
+            ));
+        }
+    }
+}
 pub trait EffectPropertiesExt: Default {
     fn set_spawn_color(&mut self, color: impl Into<LinearRgba>);
     fn set_bullet_vel(&mut self, bullet_vel: Vec2);
@@ -232,8 +413,8 @@ pub trait EffectPropertiesExt: Default {
         properties.set_spawn_color(color);
         properties
     }
-    fn with_position(mut self, x: f32, y: f32) -> Self {
-        self.set_position(Vec3::new(x, y, 0.0));
+    fn with_position(mut self, position: Vec3) -> Self {
+        self.set_position(position);
         self
     }
 }

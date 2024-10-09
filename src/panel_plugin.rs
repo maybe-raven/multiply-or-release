@@ -3,15 +3,14 @@
 use crate::{
     battlefield::{game_is_going, RestartEvent},
     collision_groups::{self, PANEL_OBSTACLES, PANEL_TRIGGER_ZONES},
-    effects::{EffectPropertiesExt, TrailEffect, TRAIL_LIFETIME},
-    participants::{Participant, ParticipantMap, TILE_COLORS},
+    effects::TRAIL_LIFETIME,
+    participants::{Participant, ParticipantMap},
 };
 use bevy::{
     color::palettes::css,
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
-use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use rand::{
     distributions::{DistIter, Distribution, Uniform},
@@ -24,8 +23,8 @@ use std::time::Duration;
 
 // Configurable
 
-const LEFT_ROOT_X: f32 = -500.0;
-const RIGHT_ROOT_X: f32 = 500.0;
+pub const LEFT_ROOT_X: f32 = -500.0;
+pub const RIGHT_ROOT_X: f32 = 500.0;
 
 const WALL_THICKNESS: f32 = 10.0;
 const WALL_COLOR: Color = Color::srgb(0.8, 0.8, 0.8);
@@ -63,7 +62,7 @@ const CIRCLE_GRID_HORIZONTAL_HALF_COUNT_EVEN_ROW: usize = 2;
 const CIRCLE_GRID_HORIZONTAL_HALF_COUNT_ODD_ROW: usize = 3;
 
 pub const WORKER_BALL_RADIUS: f32 = 5.0;
-const WORKER_BALL_SPAWN_Y: f32 = 320.0;
+pub const WORKER_BALL_SPAWN_Y: f32 = 320.0;
 const WORKER_BALL_RESTITUTION_COEFFICIENT: f32 = 0.5;
 const WORKER_BALL_SPAWN_TIMER_SECS: f32 = 10.0;
 pub const WORKER_BALL_COUNT_MAX: usize = 6;
@@ -103,7 +102,6 @@ impl Plugin for PanelPlugin {
                 (
                     spawn_workers.run_if(game_is_going.and_then(spawn_workers_condition)),
                     reset_workers.run_if(game_is_going),
-                    update_workers_particle_position,
                     trigger_event
                         .run_if(on_event::<CollisionEvent>().or_else(on_event::<RestartEvent>())),
                     restart.run_if(on_event::<RestartEvent>()),
@@ -166,41 +164,11 @@ impl TriggerZoneBundle {
     }
     // }}}
 }
-#[derive(Component, Clone, Copy)]
-struct WorkerBallTrail(Entity);
-#[derive(Component, Clone, Copy)]
-struct InactiveWorkerBallTrail(bool);
-#[derive(Bundle, Clone)]
-struct WorkerBallTrailBundle {
-    // {{{
-    link: WorkerBallTrail,
-    peb: ParticleEffectBundle,
-    name: Name,
-}
-impl WorkerBallTrailBundle {
-    fn new(
-        target: Entity,
-        target_x: f32,
-        color: impl Into<LinearRgba>,
-        effect: Handle<EffectAsset>,
-    ) -> Self {
-        Self {
-            link: WorkerBallTrail(target),
-            peb: ParticleEffectBundle {
-                effect: ParticleEffect::new(effect),
-                effect_properties: EffectProperties::from_spawn_color(color)
-                    .with_position(target_x, WORKER_BALL_SPAWN_Y),
-                ..default()
-            },
-            name: Name::new("Worker Ball Trail"),
-        }
-    }
-}
 #[derive(Component, Clone, Copy, Default)]
 /// Marker to mark this entity as a worker ball.
-struct WorkerBall;
+pub struct WorkerBall;
 #[derive(Resource, Clone, Default)]
-struct WorkerBallSpawner {
+pub struct WorkerBallSpawner {
     mesh: Mesh2dHandle,
     timer: Timer,
     counter: usize,
@@ -579,7 +547,7 @@ fn setup(
 fn spawn_workers_condition(spawner: Res<WorkerBallSpawner>) -> bool {
     spawner.counter < WORKER_BALL_COUNT_MAX
 }
-fn spawn_workers(
+pub fn spawn_workers(
     mut commands: Commands,
     mut spawner: ResMut<WorkerBallSpawner>,
     time: Res<Time>,
@@ -588,18 +556,15 @@ fn spawn_workers(
     survivors: Res<ParticipantMap<bool>>,
     left_root: Query<(Entity, &GlobalTransform), With<LeftPanelRoot>>,
     right_root: Query<(Entity, &GlobalTransform), With<RightPanelRoot>>,
-    effect: Res<TrailEffect>,
-    mut trail_query: Query<(Entity, &mut EffectProperties, &InactiveWorkerBallTrail)>,
 ) {
     spawner.timer.tick(time.delta());
     if !spawner.timer.just_finished() {
         return;
     }
-    let mut f = |a, b, root_entity, root_transform: &GlobalTransform, want_left| {
-        let root_translation = root_transform.translation();
+    let mut f = |a, b, root_entity, root_transform: &GlobalTransform| {
         let collider = Collider::ball(WORKER_BALL_RADIUS);
         let mut caster = WorkerBallShapeCaster::new(
-            root_translation.xy(),
+            root_transform.translation().xy(),
             Uniform::new(-ARENA_WIDTH_FRAC_2, ARENA_WIDTH_FRAC_2),
             &rapier,
             &collider,
@@ -608,21 +573,14 @@ fn spawn_workers(
             (None, None) => (),
             (Some(survivor), None) | (None, Some(survivor)) => {
                 let x = caster.get();
-                let ball = commands
+                commands
                     .spawn(WorkerBallBundle::new(
                         survivor,
                         x,
                         spawner.mesh.clone(),
                         materials[survivor].clone(),
                     ))
-                    .set_parent(root_entity)
-                    .id();
-                commands.spawn(WorkerBallTrailBundle::new(
-                    ball,
-                    x + root_translation.x,
-                    TILE_COLORS[survivor],
-                    effect.0.clone(),
-                ));
+                    .set_parent(root_entity);
             }
             (Some(a), Some(b)) => {
                 let mut xa;
@@ -634,43 +592,22 @@ fn spawn_workers(
                         break;
                     }
                 }
-                let mut trail_query_iter = trail_query.iter_mut().filter_map(
-                    |(e, p, &InactiveWorkerBallTrail(is_left))| {
-                        (is_left == want_left).then_some((e, p))
-                    },
-                );
-                let mut setup_trail = |participant, x| {
-                    let ball = commands
-                        .spawn(WorkerBallBundle::new(
-                            participant,
-                            x,
-                            spawner.mesh.clone(),
-                            materials[participant].clone(),
-                        ))
-                        .set_parent(root_entity)
-                        .id();
-                    if let Some((trail_entity, mut trail_properties)) = trail_query_iter.next() {
-                        commands
-                            .entity(trail_entity)
-                            .insert(WorkerBallTrail(ball))
-                            .remove::<InactiveWorkerBallTrail>();
-                        trail_properties.set_spawn_color(TILE_COLORS[participant]);
-                        trail_properties.set_position(Vec3::new(
-                            x + root_translation.x,
-                            WORKER_BALL_SPAWN_Y,
-                            0.0,
-                        ));
-                    } else {
-                        commands.spawn(WorkerBallTrailBundle::new(
-                            ball,
-                            x + root_translation.x,
-                            TILE_COLORS[participant],
-                            effect.0.clone(),
-                        ));
-                    }
-                };
-                setup_trail(a, xa);
-                setup_trail(b, xb);
+                commands
+                    .spawn(WorkerBallBundle::new(
+                        a,
+                        xa,
+                        spawner.mesh.clone(),
+                        materials[a].clone(),
+                    ))
+                    .set_parent(root_entity);
+                commands
+                    .spawn(WorkerBallBundle::new(
+                        b,
+                        xb,
+                        spawner.mesh.clone(),
+                        materials[b].clone(),
+                    ))
+                    .set_parent(root_entity);
             }
         }
     };
@@ -681,39 +618,14 @@ fn spawn_workers(
         Participant::B,
         left_root_entity,
         left_root_transform,
-        true,
     );
     f(
         Participant::C,
         Participant::D,
         right_root_entity,
         right_root_transform,
-        false,
     );
     spawner.counter += 1;
-}
-fn update_workers_particle_position(
-    mut commands: Commands,
-    mut query: Query<((Entity, &WorkerBallTrail), &mut EffectProperties)>,
-    transform_query: Query<&GlobalTransform>,
-    mut go_left: Local<bool>,
-) {
-    for ((trail_entity, &WorkerBallTrail(ball_entity)), mut properties) in &mut query {
-        if let Ok(transform) = transform_query.get(ball_entity) {
-            properties.set_position(transform.translation());
-        } else {
-            // Despawning the particle effect causes immense lag for some reason,
-            // so instead we just leave it running but make it invisible
-            commands
-                .entity(trail_entity)
-                .insert(InactiveWorkerBallTrail(*go_left))
-                .remove::<WorkerBallTrail>();
-            let x = if *go_left { LEFT_ROOT_X } else { RIGHT_ROOT_X };
-            properties.set_spawn_color(LinearRgba::NONE);
-            properties.set_position(Vec3::new(x, WORKER_BALL_SPAWN_Y, 0.0));
-            *go_left = !*go_left;
-        }
-    }
 }
 fn trigger_event(
     mut collision_events: EventReader<CollisionEvent>,
@@ -845,19 +757,10 @@ impl<'a, 'b, D: Distribution<f32>> WorkerBallShapeCaster<'a, 'b, D> {
 fn restart(
     mut commands: Commands,
     mut spawner: ResMut<WorkerBallSpawner>,
-    mut trails: Query<(&mut EffectProperties, &mut InactiveWorkerBallTrail)>,
     garbage: Query<Entity, With<WorkerBall>>,
 ) {
     spawner.reset();
     for entity in garbage.iter() {
         commands.entity(entity).despawn_recursive();
-    }
-    let mut go_left = false;
-    for (mut properties, mut trail) in trails.iter_mut() {
-        let x = if go_left { LEFT_ROOT_X } else { RIGHT_ROOT_X };
-        properties.set_spawn_color(LinearRgba::NONE);
-        properties.set_position(Vec3::new(x, WORKER_BALL_SPAWN_Y, 0.0));
-        trail.0 = go_left;
-        go_left = !go_left;
     }
 }

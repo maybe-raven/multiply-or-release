@@ -2,12 +2,10 @@
 
 use crate::{
     collision_groups::{self, all_new_bullets_except},
-    effects::{EffectPropertiesExt, TileHitEffect},
     panel_plugin::{TriggerEvent, TriggerType},
-    participants::{Participant, ParticipantMap, BALL_COLORS, TILE_COLORS},
+    participants::{Participant, ParticipantMap, TILE_COLORS},
 };
 use bevy::{color::palettes::css, prelude::*, sprite::Mesh2dHandle, time::Stopwatch};
-use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::{
     collections::VecDeque,
@@ -62,6 +60,7 @@ impl Plugin for BattlefieldPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<EliminationEvent>()
             .add_event::<RestartEvent>()
+            .add_event::<TileHitEvent>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -77,7 +76,6 @@ impl Plugin for BattlefieldPlugin {
                     handle_elimination
                         .run_if(on_event::<EliminationEvent>())
                         .after(update_charge_level),
-                    cleanup_particle_emitters.before(handle_bullet_tile_collision),
                     restart.run_if(on_event::<RestartEvent>()),
                 ),
             )
@@ -93,32 +91,17 @@ impl Plugin for BattlefieldPlugin {
     }
 }
 
-#[derive(Resource, Clone, Default)]
-struct EffectInstanceManager {
-    pool: Vec<Entity>,
-    dispatched: Vec<Entity>,
-}
-impl EffectInstanceManager {
-    fn add(&mut self, entity: Entity) {
-        self.dispatched.push(entity);
-    }
-    fn get(&mut self) -> Option<Entity> {
-        if let Some(entity) = self.pool.pop() {
-            self.dispatched.push(entity);
-            Some(entity)
-        } else {
-            None
-        }
-    }
-    fn reset(&mut self) {
-        self.pool.append(&mut self.dispatched);
-    }
-}
-#[derive(Event, Default)]
+#[derive(Clone, Copy, Event, Default)]
 pub struct RestartEvent;
-#[derive(Event)]
+#[derive(Clone, Copy, Event)]
 pub struct EliminationEvent {
     pub participant: Participant,
+}
+#[derive(Clone, Copy, Event)]
+pub struct TileHitEvent {
+    pub position: Vec3,
+    pub participant: Participant,
+    pub bullet_velocity: Vec2,
 }
 impl EliminationEvent {
     fn new(participant: Participant) -> Self {
@@ -138,7 +121,7 @@ struct BattlefieldRoot;
 struct TileRoot;
 /// Marker to mark this entity as a tile.
 #[derive(Component, Clone, Copy)]
-struct Tile;
+pub struct Tile;
 /// Component bundle for each of the individual tiles on the battle field.
 #[derive(Bundle)]
 struct TileBundle {
@@ -483,7 +466,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
 ) {
-    commands.insert_resource(EffectInstanceManager::default());
     commands.insert_resource(TurretStopwatch::default());
     commands.insert_resource(SurvivorCount::default());
     const OFFSET: f32 = BATTLEFIELD_HALF_WIDTH + BATTLEFIELD_BOUNDARY_HALF_WIDTH;
@@ -862,8 +844,8 @@ fn handle_elimination(
     }
 }
 fn handle_bullet_tile_collision(
-    mut commands: Commands,
-    mut events: EventReader<CollisionEvent>,
+    mut collision_events: EventReader<CollisionEvent>,
+    mut tile_hit_events: EventWriter<TileHitEvent>,
     mut bullet_query: Query<(&Participant, &mut Charge, &Velocity), With<Bullet>>,
     mut tile_query: Query<
         (
@@ -874,11 +856,8 @@ fn handle_bullet_tile_collision(
         ),
         (With<Tile>, Without<Bullet>),
     >,
-    effect: Res<TileHitEffect>,
-    mut effect_query: Query<(&mut EffectProperties, &mut Transform, &mut EffectSpawner)>,
-    mut instance_manager: ResMut<EffectInstanceManager>,
 ) {
-    for event in events.read() {
+    for event in collision_events.read() {
         match event {
             &CollisionEvent::Started(a, b, _) => {
                 let (&bullet_owner, mut charge, velocity) = if let Ok(x) = bullet_query.get_mut(a) {
@@ -888,7 +867,7 @@ fn handle_bullet_tile_collision(
                 } else {
                     continue;
                 };
-                let (mut tile_owner, mut sprite, mut collision_group, tile_transform) =
+                let (mut tile_owner, mut sprite, mut collision_group, transform) =
                     if let Ok(x) = tile_query.get_mut(a) {
                         x
                     } else if let Ok(x) = tile_query.get_mut(b) {
@@ -910,23 +889,11 @@ fn handle_bullet_tile_collision(
                         | all_new_bullets_except(bullet_owner),
                 );
                 charge.value -= 1;
-                if let Some(effect_entity) = instance_manager.get() {
-                    let (mut properties, mut transform, mut spawner) = effect_query.get_mut(effect_entity).expect("entity returned by `InstanceManager` should have an `EffectProperties` component.");
-                    properties.set_spawn_color(BALL_COLORS[bullet_owner]);
-                    properties.set_bullet_vel(velocity.linvel);
-                    transform.translation = tile_transform.translation();
-                    spawner.reset();
-                } else {
-                    let entity = commands
-                        .spawn(ParticleEffectBundle {
-                            effect: ParticleEffect::new(effect.0.clone()),
-                            transform: Transform::from_translation(tile_transform.translation()),
-                            ..default()
-                        })
-                        .insert(Name::new("Tile Hit Particle Spawner"))
-                        .id();
-                    instance_manager.add(entity);
-                }
+                tile_hit_events.send(TileHitEvent {
+                    position: transform.translation(),
+                    participant: bullet_owner,
+                    bullet_velocity: velocity.linvel,
+                });
             }
             CollisionEvent::Stopped(_, _, _) => (),
         }
@@ -934,9 +901,6 @@ fn handle_bullet_tile_collision(
 }
 pub fn game_is_going(survivor_count: Res<SurvivorCount>) -> bool {
     survivor_count.0 > 1
-}
-fn cleanup_particle_emitters(mut instance_manager: ResMut<EffectInstanceManager>) {
-    instance_manager.reset();
 }
 fn restart(
     mut commands: Commands,
