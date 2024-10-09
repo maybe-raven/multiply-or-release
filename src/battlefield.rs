@@ -42,7 +42,7 @@ const BULLET_TEXT_COLOR: Color = Color::BLACK;
 const BULLET_TEXT_FONT_SIZE_ASPECT: f32 = 0.5;
 const BULLET_MINIMUM_TEXT_SIZE: f32 = 8.0;
 const BULLET_SIZE_FACTOR: f32 = 2.0;
-const BULLET_DENSITY_FACTOR: f32 = 5.0;
+const BULLET_MASS_FACTOR: f32 = 2.0;
 const BULLET_RESTITUTION_COEFFICIENT: f32 = 0.75;
 const CHARGED_SHOT_BULLET_SPEED: f32 = 250.0;
 const BURST_SHOT_BULLET_SPEED: f32 = 500.0;
@@ -236,8 +236,8 @@ impl Charge {
     fn get_scale(&self) -> f32 {
         self.level as f32 * BULLET_SIZE_FACTOR
     }
-    fn get_density(&self) -> f32 {
-        self.level as f32 * BULLET_DENSITY_FACTOR
+    fn get_mass(&self) -> f32 {
+        self.value as f32 * BULLET_MASS_FACTOR
     }
 }
 #[derive(Bundle)]
@@ -341,7 +341,7 @@ impl BulletBundle {
             collider_scale: ColliderScale::Absolute(Vect::splat(1.0)),
             velocity: Velocity::linear(direction * bullet_speed),
             rigidbody: RigidBody::Dynamic,
-            mass: ColliderMassProperties::Density(1.0),
+            mass: ColliderMassProperties::Mass(charge.get_mass()),
             text_bundle: Text2dBundle {
                 transform: Transform::from_translation(position.extend(BULLET_TEXT_Z)),
                 text: Text::from_section(
@@ -641,10 +641,7 @@ fn update_charge_ball(
             *collider_scale = new_scale;
         }
         if let Some(mut mass_properties) = mass_properties {
-            let new_density = ColliderMassProperties::Density(charge.get_density());
-            if *mass_properties != new_density {
-                *mass_properties = new_density;
-            }
+            *mass_properties = ColliderMassProperties::Mass(charge.get_mass());
         }
         let mut ball_transform = transform_query.get_mut(link).unwrap();
         ball_transform.scale.x = scale;
