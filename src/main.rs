@@ -38,6 +38,10 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Name::new("Camera"),
         Camera2dBundle {
+            camera: Camera {
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                ..default()
+            },
             projection: OrthographicProjection {
                 far: 1000.0,
                 near: -1000.0,
