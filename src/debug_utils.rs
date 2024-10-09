@@ -10,10 +10,10 @@ use bevy::prelude::*;
 pub struct DebugUtilsPlugin;
 impl Plugin for DebugUtilsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
-            // app.add_plugins(bevy_rapier2d::render::RapierDebugRenderPlugin::default())
-            .insert_resource(AutoTimer::default())
-            .add_systems(Update, auto_elimination);
+        app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
+        // app.add_plugins(bevy_rapier2d::render::RapierDebugRenderPlugin::default())
+        // .insert_resource(AutoTimer::default())
+        // .add_systems(Update, auto_elimination);
     }
 }
 

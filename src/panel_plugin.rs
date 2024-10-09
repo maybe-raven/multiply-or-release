@@ -3,7 +3,6 @@
 use crate::{
     battlefield::{game_is_going, RestartEvent},
     collision_groups::{self, PANEL_OBSTACLES, PANEL_TRIGGER_ZONES},
-    effects::TRAIL_LIFETIME,
     participants::{Participant, ParticipantMap},
 };
 use bevy::{
@@ -65,6 +64,11 @@ pub const WORKER_BALL_RADIUS: f32 = 5.0;
 pub const WORKER_BALL_SPAWN_Y: f32 = 320.0;
 const WORKER_BALL_RESTITUTION_COEFFICIENT: f32 = 0.5;
 const WORKER_BALL_SPAWN_TIMER_SECS: f32 = 10.0;
+#[cfg(not(target_family = "wasm"))]
+const WORKER_BALL_SPAWN_TIMER_INIT_SECS: f32 =
+    WORKER_BALL_SPAWN_TIMER_SECS - crate::effects::TRAIL_LIFETIME;
+#[cfg(target_family = "wasm")]
+const WORKER_BALL_SPAWN_TIMER_INIT_SECS: f32 = WORKER_BALL_SPAWN_TIMER_SECS - 0.1;
 pub const WORKER_BALL_COUNT_MAX: usize = 6;
 const WORKER_BALL_GRAVITY_SCALE: f32 = 15.0;
 
@@ -176,9 +180,7 @@ pub struct WorkerBallSpawner {
 impl WorkerBallSpawner {
     fn new(mesh: Mesh2dHandle) -> Self {
         let mut timer = Timer::from_seconds(WORKER_BALL_SPAWN_TIMER_SECS, TimerMode::Repeating);
-        timer.tick(Duration::from_secs_f32(
-            WORKER_BALL_SPAWN_TIMER_SECS - TRAIL_LIFETIME,
-        ));
+        timer.tick(Duration::from_secs_f32(WORKER_BALL_SPAWN_TIMER_INIT_SECS));
         Self {
             mesh,
             timer,
@@ -187,9 +189,8 @@ impl WorkerBallSpawner {
     }
     fn reset(&mut self) {
         self.timer.reset();
-        self.timer.tick(Duration::from_secs_f32(
-            WORKER_BALL_SPAWN_TIMER_SECS - TRAIL_LIFETIME,
-        ));
+        self.timer
+            .tick(Duration::from_secs_f32(WORKER_BALL_SPAWN_TIMER_INIT_SECS));
         self.counter = 0;
     }
 }

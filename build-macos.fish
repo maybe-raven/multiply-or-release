@@ -1,5 +1,4 @@
 echo "Building a MacOS universal app."
-confirm "Did you remove the `dynamic_linking` feature flag?"
 # set the name of the Mac App
 set app_name "Multiply or Release"
 # set the name of your rust crate

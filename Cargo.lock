@@ -2742,6 +2742,7 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_hanabi",
  "bevy_rapier2d",
+ "log",
  "rand",
 ]
 

@@ -14,12 +14,18 @@ use std::{
 
 // Constants {{{
 
+#[cfg(not(target_family = "wasm"))]
 const TILE_COUNT: usize = 100;
+#[cfg(target_family = "wasm")]
+const TILE_COUNT: usize = 69;
 const TILE_DIMENSION: f32 = BATTLEFIELD_HALF_WIDTH / TILE_COUNT as f32;
 pub const BATTLEFIELD_HALF_WIDTH: f32 = 360.0;
 const BATTLEFIELD_BOUNDARY_HALF_WIDTH: f32 = 50.0;
 
+#[cfg(not(target_family = "wasm"))]
 const BOOSTED_TURRET_CHARGE_VALUE: u64 = 16;
+#[cfg(target_family = "wasm")]
+const BOOSTED_TURRET_CHARGE_VALUE: u64 = 8;
 /// The time in seconds after getting hit that a turret's charge will reset to 1 whenever it fires
 /// instead of [ `BOOSTED_TURRET_CHARGE_VALUE` ]
 const TURRET_BOOST_COOLDOWN: f32 = 5.0;
@@ -97,6 +103,7 @@ pub struct RestartEvent;
 pub struct EliminationEvent {
     pub participant: Participant,
 }
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 #[derive(Clone, Copy, Event)]
 pub struct TileHitEvent {
     pub position: Vec3,

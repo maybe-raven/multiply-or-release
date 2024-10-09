@@ -6,11 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.14.0", features = ["dynamic_linking"] }
-bevy-inspector-egui = "0.26.0"
-bevy_hanabi = { version = "0.12.2", default-features = false, features = ["2d"] }
+bevy = "0.14.0"
+bevy-inspector-egui = { version = "0.26.0", optional = true }
 bevy_rapier2d = "0.27.0"
+log = { version = "*", features = ["release_max_level_warn"] }
 rand = "0.8.5"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy_hanabi = { version = "0.12.2", default-features = false, features = ["2d"] }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
@@ -20,7 +23,13 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
-# Add this to your Cargo.toml
+# This is used by trunk as it doesn't support custom profiles: https://github.com/trunk-rs/trunk/issues/605
+# xbuild also uses this profile for building android AABs because I couldn't find a configuration for it
 [profile.release]
+opt-level = 3
+lto = "thin"
 codegen-units = 1
+strip = true
 
+[features]
+dev = [ "bevy/dynamic_linking", "dep:bevy-inspector-egui" ]

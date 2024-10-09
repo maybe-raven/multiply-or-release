@@ -79,6 +79,7 @@ pub enum Participant {
     C,
     D,
 }
+#[cfg(feature = "dev")]
 impl Participant {
     pub const ALL: [Self; 4] = [Self::A, Self::B, Self::C, Self::D];
 }
