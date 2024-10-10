@@ -71,9 +71,7 @@ impl Plugin for BattlefieldPlugin {
                 (
                     rotate_turret,
                     handle_bullet_tile_collision,
-                    handle_bullet_turret_collision
-                        .run_if(game_is_going)
-                        .after(handle_bullet_tile_collision),
+                    handle_bullet_turret_collision.after(handle_bullet_tile_collision),
                     handle_trigger_events
                         .after(handle_bullet_turret_collision)
                         .run_if(on_event::<TriggerEvent>().or_else(on_event::<RestartEvent>())),
