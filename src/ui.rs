@@ -2,7 +2,7 @@
 
 use crate::{
     battlefield::{game_is_going, EliminationEvent, RestartEvent},
-    utils::{BallColor, ParticipantMap},
+    participants::BALL_COLORS,
 };
 use bevy::prelude::*;
 
@@ -30,7 +30,6 @@ const GAME_OVER_TEXT_FONT_SIZE: f32 = 72.0;
 
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
-// const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
 
 // }}}
 
@@ -46,14 +45,14 @@ struct EliminationTextBundle {
     timer: EliminationTextTimer,
 }
 impl EliminationTextBundle {
-    fn new(participant: impl std::fmt::Display, color: Color) -> Self {
+    fn new(participant: impl std::fmt::Display, color: impl Into<Color>) -> Self {
         EliminationTextBundle {
             text_bundle: TextBundle::from_section(
                 format!("{} Eliminated", participant),
                 TextStyle {
                     font: default(),
                     font_size: ELIMINATION_TEXT_FONT_SIZE,
-                    color,
+                    color: color.into(),
                 },
             ),
             timer: EliminationTextTimer(Timer::from_seconds(
@@ -143,14 +142,13 @@ fn button_system(
 fn add_elimination_text(
     mut commands: Commands,
     mut events: EventReader<EliminationEvent>,
-    colors: Res<ParticipantMap<BallColor>>,
     ui_root: Query<Entity, With<UIRoot>>,
 ) {
     for event in events.read() {
         commands
             .spawn(EliminationTextBundle::new(
                 event.participant,
-                colors.get(event.participant).0,
+                BALL_COLORS[event.participant],
             ))
             .set_parent(ui_root.single());
     }

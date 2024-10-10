@@ -1,18 +1,18 @@
 use battlefield::BattlefieldPlugin;
 use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_rapier2d::prelude::*;
-use effects::EffectPlugin;
+use effects::EffectsPlugin;
 use panel_plugin::PanelPlugin;
+use participants::ParticipantsPlugin;
 use ui::UIPlugin;
-use utils::{Participant, UtilsPlugin};
 
 mod battlefield;
 mod collision_groups;
 mod debug_utils;
 mod effects;
 mod panel_plugin;
+mod participants;
 mod ui;
-mod utils;
 
 const WINDOW_TITLE: &str = "Multiply or Release";
 
@@ -29,8 +29,8 @@ fn main() {
         .add_plugins(DefaultPlugins.set(window_plugin))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins((
-            UtilsPlugin,
-            EffectPlugin,
+            ParticipantsPlugin,
+            EffectsPlugin,
             PanelPlugin,
             BattlefieldPlugin,
             UIPlugin,

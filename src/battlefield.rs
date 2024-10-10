@@ -1,19 +1,17 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
-use std::{
-    collections::VecDeque,
-    f32::consts::{FRAC_PI_2, PI},
-};
-
-use bevy::{color::palettes::css, prelude::*, sprite::Mesh2dHandle, time::Stopwatch};
-use bevy_hanabi::prelude::*;
-use bevy_rapier2d::prelude::*;
-
 use crate::{
     collision_groups::{self, all_new_bullets_except},
     effects::{EffectPropertiesExt, TileHitEffect},
     panel_plugin::{TriggerEvent, TriggerType},
-    utils::{BallColor, Participant, ParticipantMap, TileColor},
+    participants::{Participant, ParticipantMap, BALL_COLORS, TILE_COLORS},
+};
+use bevy::{color::palettes::css, prelude::*, sprite::Mesh2dHandle, time::Stopwatch};
+use bevy_hanabi::prelude::*;
+use bevy_rapier2d::prelude::*;
+use std::{
+    collections::VecDeque,
+    f32::consts::{FRAC_PI_2, PI},
 };
 
 // Constants {{{
@@ -158,7 +156,7 @@ struct TileBundle {
     name: Name,
 }
 impl TileBundle {
-    fn new(owner: Participant, color: Color, x: f32, y: f32) -> Self {
+    fn new(owner: Participant, color: impl Into<Color>, x: f32, y: f32) -> Self {
         Self {
             markers: (Tile, Sensor),
             sprite_bundle: SpriteBundle {
@@ -167,7 +165,10 @@ impl TileBundle {
                     scale: Vec3::new(TILE_DIMENSION, TILE_DIMENSION, 1.0),
                     rotation: Quat::IDENTITY,
                 },
-                sprite: Sprite { color, ..default() },
+                sprite: Sprite {
+                    color: color.into(),
+                    ..default()
+                },
                 ..default()
             },
             collider: Collider::cuboid(0.5, 0.5),
@@ -480,7 +481,6 @@ impl TurretPlatformBundle {
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    colors: Res<ParticipantMap<TileColor>>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
 ) {
     commands.insert_resource(EffectInstanceManager::default());
@@ -522,7 +522,7 @@ fn setup(
         .spawn((Name::new("Tile Root"), (TileRoot, SpatialBundle::default())))
         .set_parent(root)
         .id();
-    setup_tiles(&mut commands, tile_root, &colors);
+    setup_tiles(&mut commands, tile_root);
     let mesh = Mesh2dHandle(meshes.add(Circle::new(1.0)));
     let maps = setup_turrets(&mut commands, root, mesh.clone(), &materials);
     commands.insert_resource(maps);
@@ -554,22 +554,22 @@ fn update_charge_level(
         }
     }
 }
-fn setup_tiles(commands: &mut Commands, tile_root: Entity, colors: &ParticipantMap<TileColor>) {
+fn setup_tiles(commands: &mut Commands, tile_root: Entity) {
     for i in 0..TILE_COUNT {
         let x = TILE_DIMENSION / 2.0 + i as f32 * TILE_DIMENSION;
         for j in 0..TILE_COUNT {
             let y = TILE_DIMENSION / 2.0 + j as f32 * TILE_DIMENSION;
             commands
-                .spawn(TileBundle::new(Participant::A, colors.a.0, x, y))
+                .spawn(TileBundle::new(Participant::A, TILE_COLORS.a, x, y))
                 .set_parent(tile_root);
             commands
-                .spawn(TileBundle::new(Participant::B, colors.b.0, -x, y))
+                .spawn(TileBundle::new(Participant::B, TILE_COLORS.b, -x, y))
                 .set_parent(tile_root);
             commands
-                .spawn(TileBundle::new(Participant::C, colors.c.0, x, -y))
+                .spawn(TileBundle::new(Participant::C, TILE_COLORS.c, x, -y))
                 .set_parent(tile_root);
             commands
-                .spawn(TileBundle::new(Participant::D, colors.d.0, -x, -y))
+                .spawn(TileBundle::new(Participant::D, TILE_COLORS.d, -x, -y))
                 .set_parent(tile_root);
         }
     }
@@ -584,7 +584,7 @@ fn setup_turrets(
         let ball = commands
             .spawn(ChargeBallBundle::new(
                 mesh.clone(),
-                materials.get(owner).clone(),
+                materials[owner].clone(),
             ))
             .id();
         let platform = commands
@@ -754,7 +754,7 @@ fn fire_shots(
         let ball = commands
             .spawn(ChargeBallBundle::new(
                 mesh.clone(),
-                materials.get(owner).clone(),
+                materials[owner].clone(),
             ))
             .id();
         commands
@@ -782,7 +782,7 @@ fn handle_trigger_events(
         trigger_events.clear();
     }
     for event in trigger_events.read() {
-        let &entity = turret_entities.get(event.participant);
+        let entity = turret_entities[event.participant];
         let Ok((mut charge, mut turret)) = turret_query.get_mut(entity) else {
             continue;
         };
@@ -852,7 +852,7 @@ fn handle_elimination(
     participant_entity_query: Query<(Entity, &Participant), (Without<Tile>, Without<Bullet>)>,
 ) {
     for event in events.read() {
-        survivors.set(event.participant, false);
+        survivors[event.participant] = false;
         survivor_count.0 -= 1;
         for (entity, &participant) in &participant_entity_query {
             if participant == event.participant {
@@ -864,8 +864,6 @@ fn handle_elimination(
 fn handle_bullet_tile_collision(
     mut commands: Commands,
     mut events: EventReader<CollisionEvent>,
-    tile_colors: Res<ParticipantMap<TileColor>>,
-    ball_colors: Res<ParticipantMap<BallColor>>,
     mut bullet_query: Query<(&Participant, &mut Charge, &Velocity), With<Bullet>>,
     mut tile_query: Query<
         (
@@ -905,7 +903,7 @@ fn handle_bullet_tile_collision(
                     continue;
                 }
                 *tile_owner = bullet_owner;
-                sprite.color = tile_colors.get(bullet_owner).0;
+                sprite.color = Color::from(TILE_COLORS[bullet_owner]);
                 *collision_group = CollisionGroups::new(
                     collision_groups::tile(bullet_owner),
                     collision_groups::all_bullets_except(bullet_owner)
@@ -914,7 +912,7 @@ fn handle_bullet_tile_collision(
                 charge.value -= 1;
                 if let Some(effect_entity) = instance_manager.get() {
                     let (mut properties, mut transform, mut spawner) = effect_query.get_mut(effect_entity).expect("entity returned by `InstanceManager` should have an `EffectProperties` component.");
-                    properties.set_spawn_color(ball_colors.get(bullet_owner).0);
+                    properties.set_spawn_color(BALL_COLORS[bullet_owner]);
                     properties.set_bullet_vel(velocity.linvel);
                     transform.translation = tile_transform.translation();
                     spawner.reset();
@@ -946,7 +944,6 @@ fn restart(
     mut survivors: ResMut<ParticipantMap<bool>>,
     mut turrets: ResMut<ParticipantMap<Entity>>,
     mut stopwatch: ResMut<TurretStopwatch>,
-    colors: Res<ParticipantMap<TileColor>>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
     ball_mesh: Res<BulletMesh>,
     tile_root: Query<(Entity, &Children), With<TileRoot>>,
@@ -965,7 +962,7 @@ fn restart(
     for &tile in tile_root_children.iter() {
         commands.entity(tile).despawn_recursive();
     }
-    setup_tiles(&mut commands, tile_root_entity, &colors);
+    setup_tiles(&mut commands, tile_root_entity);
     *turrets = setup_turrets(
         &mut commands,
         root.single(),

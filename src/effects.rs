@@ -1,6 +1,6 @@
 use crate::{
     panel_plugin::{WORKER_BALL_COUNT_MAX, WORKER_BALL_RADIUS},
-    utils::setup_participant_maps,
+    participants,
 };
 use bevy::prelude::*;
 use bevy_hanabi::prelude::*;
@@ -19,15 +19,17 @@ const BULLET_VEL_PROPERTY: &str = "bullet_vel";
 
 // }}}
 
-pub struct EffectPlugin;
-impl Plugin for EffectPlugin {
+pub struct EffectsPlugin;
+impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(HanabiPlugin).add_systems(
             PreStartup,
-            (setup_tile_hit_effect, setup_trail_effect).after(setup_participant_maps),
+            (setup_tile_hit_effect, setup_trail_effect).after(participants::setup),
         );
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub struct EffectsSystemSet;
 #[derive(Clone, Resource)]
 pub struct TileHitEffect(pub Handle<EffectAsset>);
 #[derive(Clone, Resource)]

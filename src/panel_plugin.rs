@@ -4,8 +4,7 @@ use crate::{
     battlefield::{game_is_going, RestartEvent},
     collision_groups::{self, PANEL_OBSTACLES, PANEL_TRIGGER_ZONES},
     effects::{EffectPropertiesExt, TrailEffect, TRAIL_LIFETIME},
-    utils::{ParticipantMap, TileColor},
-    Participant,
+    participants::{Participant, ParticipantMap, TILE_COLORS},
 };
 use bevy::{
     color::palettes::css,
@@ -107,19 +106,15 @@ impl Plugin for PanelPlugin {
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                spawn_workers.run_if(game_is_going.and_then(spawn_workers_condition)),
-            )
-            .add_systems(Update, ball_reset.run_if(game_is_going))
-            .add_systems(
-                Update,
-                trigger_event
-                    .run_if(on_event::<CollisionEvent>().or_else(on_event::<RestartEvent>())),
-            )
-            .add_systems(
-                Update,
-                update_workers_particle_position.before(spawn_workers),
-            )
-            .add_systems(Update, restart.run_if(on_event::<RestartEvent>()));
+                (
+                    spawn_workers.run_if(game_is_going.and_then(spawn_workers_condition)),
+                    reset_workers.run_if(game_is_going),
+                    update_workers_particle_position,
+                    trigger_event
+                        .run_if(on_event::<CollisionEvent>().or_else(on_event::<RestartEvent>())),
+                    restart.run_if(on_event::<RestartEvent>()),
+                ),
+            );
     }
 }
 
@@ -672,7 +667,6 @@ fn spawn_workers(
     time: Res<Time>,
     rapier: Res<RapierContext>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
-    colors: Res<ParticipantMap<TileColor>>,
     survivors: Res<ParticipantMap<bool>>,
     root: Query<(Entity, &GlobalTransform, &PanelRoot)>,
     effect: Res<TrailEffect>,
@@ -682,7 +676,6 @@ fn spawn_workers(
     if !spawner.timer.just_finished() {
         return;
     }
-    // TODO: handle trail effect
     let mut f = |a, b, root_entity, root_transform: &GlobalTransform, want_left| {
         let root_translation = root_transform.translation();
         let collider = Collider::ball(WORKER_BALL_RADIUS);
@@ -701,14 +694,14 @@ fn spawn_workers(
                         survivor,
                         x,
                         spawner.mesh.clone(),
-                        materials.get(survivor).clone(),
+                        materials[survivor].clone(),
                     ))
                     .set_parent(root_entity)
                     .id();
                 commands.spawn(WorkerBallTrailBundle::new(
                     ball,
                     x + root_translation.x,
-                    colors.get(survivor).0,
+                    TILE_COLORS[survivor],
                     effect.0.clone(),
                 ));
             }
@@ -733,7 +726,7 @@ fn spawn_workers(
                             participant,
                             x,
                             spawner.mesh.clone(),
-                            materials.get(participant).clone(),
+                            materials[participant].clone(),
                         ))
                         .set_parent(root_entity)
                         .id();
@@ -742,7 +735,7 @@ fn spawn_workers(
                             .entity(trail_entity)
                             .insert(WorkerBallTrail(ball))
                             .remove::<InactiveWorkerBallTrail>();
-                        trail_properties.set_spawn_color(colors.get(participant).0);
+                        trail_properties.set_spawn_color(TILE_COLORS[participant]);
                         trail_properties.set_position(Vec3::new(
                             x + root_translation.x,
                             WORKER_BALL_SPAWN_Y,
@@ -752,7 +745,7 @@ fn spawn_workers(
                         commands.spawn(WorkerBallTrailBundle::new(
                             ball,
                             x + root_translation.x,
-                            colors.get(participant).0,
+                            TILE_COLORS[participant],
                             effect.0.clone(),
                         ));
                     }
@@ -846,7 +839,7 @@ fn trigger_event(
         }
     }
 }
-fn ball_reset(
+fn reset_workers(
     mut collision_events: EventReader<CollisionEvent>,
     rapier: Res<RapierContext>,
     root_query: Query<(&GlobalTransform, &PanelRoot)>,

@@ -8,7 +8,7 @@ use crate::{
     battlefield::{EliminationEvent, BATTLEFIELD_HALF_WIDTH},
     effects::TileHitEffect,
     panel_plugin::{TriggerEvent, TriggerType},
-    utils::{BallColor, Participant, ParticipantMap},
+    participants::{Participant, BALL_COLORS},
 };
 
 pub struct DebugUtilsPlugin;
@@ -33,7 +33,6 @@ fn auto_hanabi(
     mut timer: ResMut<AutoTimer>,
     time: Res<Time>,
     effect: Res<TileHitEffect>,
-    colors: Res<ParticipantMap<BallColor>>,
 ) {
     timer.tick(time.delta());
     if timer.just_finished() {
@@ -48,7 +47,7 @@ fn auto_hanabi(
             3 => Participant::D,
             _ => unreachable!(),
         };
-        let color = Srgba::from(colors.get(p).0);
+        let color = BALL_COLORS[p];
         let color = 0xFF000000u32
             | ((color.blue * 255.0) as u32) << 16
             | ((color.green * 255.0) as u32) << 8

@@ -2,7 +2,7 @@
 
 use bevy_rapier2d::geometry::Group;
 
-use crate::utils::Participant;
+use crate::participants::Participant;
 
 pub const PANEL_OBSTACLES: Group = Group::GROUP_1;
 pub const PANEL_BALLS: Group = Group::GROUP_2;
