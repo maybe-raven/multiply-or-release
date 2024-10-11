@@ -18,7 +18,7 @@ use rand::{
     rngs::ThreadRng,
     thread_rng, Rng,
 };
-use std::{borrow::Cow, time::Duration};
+use std::time::Duration;
 
 // Constants {{{
 
@@ -91,12 +91,6 @@ const CIRCLE_DIAMETER: f32 = CIRCLE_RADIUS * 2.0;
 
 const WORKER_BALL_DIAMETER: f32 = WORKER_BALL_RADIUS * 2.0;
 
-// Messages
-
-const EXPECT_EACH_PANEL_SIDE_EXIST_MSG: &str =
-    "There should be exactly one `PanelRootSide::Left` and one `PanelRootSide::Right`.";
-const EXPECT_TWO_PANELS_MSG: &str = "There should be exactly two entities with `PanelRoot`.";
-
 // }}}
 
 pub struct PanelPlugin;
@@ -138,17 +132,7 @@ impl std::fmt::Display for TriggerType {
         }
     }
 }
-
-#[derive(Bundle, Clone, Resource)]
-struct TriggerZoneDividerBundle {
-    // {{{
-    matmesh: MaterialMesh2dBundle<ColorMaterial>,
-    collider: Collider,
-    collision_groups: CollisionGroups,
-    rigidbody: RigidBody,
-}
-
-#[derive(Bundle, Clone, Resource)]
+#[derive(Bundle, Clone)]
 struct TriggerZoneBundle {
     // {{{
     sprite_bundle: SpriteBundle,
@@ -288,22 +272,11 @@ impl WorkerBallBundle {
     }
     // }}}
 }
-#[derive(Clone, Copy, Component, PartialEq, Eq)]
-pub enum PanelRootSide {
-    Left,
-    Right,
-}
-impl PanelRootSide {
-    fn for_participant(p: Participant) -> Self {
-        match p {
-            Participant::A | Participant::B => Self::Left,
-            Participant::C | Participant::D => Self::Right,
-        }
-    }
-}
 #[derive(Component, Clone, Copy)]
-pub struct PanelRoot(PanelRootSide);
-#[derive(Bundle)]
+pub struct LeftPanelRoot;
+#[derive(Component, Clone, Copy)]
+pub struct RightPanelRoot;
+#[derive(Clone, Bundle)]
 /// Component bundle for the round obstacles in the side panels and the walls.
 /// (I don't know if meshes and colliders have to be continous. Maybe we can just make a single
 /// entity for the entire obstacle course.)
@@ -319,79 +292,14 @@ struct ObstacleBundle {
     rigidbody: RigidBody,
     name: Name,
 }
-#[derive(Debug, Clone, Default)]
-struct ObstacleBundleBuilder {
-    /// Bevy rendering component used to display the ball.
-    translation: Vec3,
-    material: Option<Handle<ColorMaterial>>,
-    mesh: Option<Mesh2dHandle>,
-    /// Rapier collider component.
-    collider: Option<Collider>,
-    name: Option<Name>,
+impl ObstacleBundle {
+    fn with_xy(mut self, x: f32, y: f32) -> Self {
+        let translation = &mut self.matmesh.transform.translation;
+        translation.x = x;
+        translation.y = y;
+        self
+    }
 }
-impl ObstacleBundleBuilder {
-    fn new() -> Self {
-        Self::default()
-    }
-    fn xy(mut self, x: f32, y: f32) -> Self {
-        self.translation.x = x;
-        self.translation.y = y;
-        self
-    }
-    fn z(mut self, z: f32) -> Self {
-        self.translation.z = z;
-        self
-    }
-    fn material(mut self, material: Handle<ColorMaterial>) -> Self {
-        self.material = Some(material);
-        self
-    }
-    fn mesh(mut self, mesh: Handle<Mesh>) -> Self {
-        self.mesh = Some(mesh.into());
-        self
-    }
-    fn collider(mut self, collider: Collider) -> Self {
-        self.collider = Some(collider);
-        self
-    }
-    fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
-        self.name = Some(Name::new(name));
-        self
-    }
-    fn build(self) -> Option<ObstacleBundle> {
-        let ObstacleBundleBuilder {
-            translation: Vec3 { x, y, z },
-            material: Some(material),
-            mesh: Some(mesh),
-            collider: Some(collider),
-            name: Some(name),
-        } = self
-        else {
-            return None;
-        };
-        Some(ObstacleBundle {
-            matmesh: MaterialMesh2dBundle {
-                mesh,
-                material,
-                transform: Transform::from_xyz(x, y, z),
-                ..default()
-            },
-            collider,
-            collision_groups: CollisionGroups::new(
-                collision_groups::PANEL_OBSTACLES,
-                collision_groups::PANEL_BALLS,
-            ),
-            rigidbody: RigidBody::Fixed,
-            name,
-        })
-    }
-    /// Build trust me bro.
-    fn buildtmb(self) -> ObstacleBundle {
-        self.build().unwrap()
-    }
-    // }}}
-}
-
 fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -403,7 +311,7 @@ fn setup(
     let left_root = commands
         .spawn((
             Name::new("Left Panel Root"),
-            PanelRoot(PanelRootSide::Left),
+            LeftPanelRoot,
             SpatialBundle::from_transform(Transform::from_xyz(LEFT_ROOT_X, 0.0, 0.0)),
             RigidBody::Fixed,
             CollisionGroups::new(
@@ -425,7 +333,7 @@ fn setup(
     let right_root = commands
         .spawn((
             Name::new("Right Panel Root"),
-            PanelRoot(PanelRootSide::Right),
+            RightPanelRoot,
             SpatialBundle::from_transform(Transform::from_xyz(RIGHT_ROOT_X, 0.0, 0.0)),
             RigidBody::Fixed,
             CollisionGroups::new(
@@ -444,23 +352,37 @@ fn setup(
             ),
         ))
         .id();
-    let circle_builder = ObstacleBundleBuilder::new()
-        .name("Circle Obstacle")
-        .z(CIRCLE_Z)
-        .material(materials.add(CIRCLE_COLOR))
-        .mesh(meshes.add(Circle::new(CIRCLE_RADIUS)))
-        .collider(Collider::ball(CIRCLE_RADIUS));
-
+    let circle_template = ObstacleBundle {
+        matmesh: MaterialMesh2dBundle {
+            material: materials.add(CIRCLE_COLOR),
+            mesh: Mesh2dHandle(meshes.add(Circle::new(CIRCLE_RADIUS))),
+            transform: Transform::from_xyz(0.0, 0.0, CIRCLE_Z),
+            ..default()
+        },
+        collider: Collider::ball(CIRCLE_RADIUS),
+        collision_groups: CollisionGroups::new(
+            collision_groups::PANEL_OBSTACLES,
+            collision_groups::PANEL_BALLS,
+        ),
+        rigidbody: RigidBody::Fixed,
+        name: Name::from("Circle Obstacle"),
+    };
     const LENGTH: f32 = TRIGGER_ZONE_DIVIDER_HEIGHT_OFFSET + TRIGGER_ZONE_HEIGHT;
-    let divider_builder = ObstacleBundleBuilder::new()
-        .name("Trigger Zone Divider")
-        .z(TRIGGER_ZONE_DIVIDER_Z)
-        .material(materials.add(TRIGGER_ZONE_DIVIDER_COLOR))
-        .mesh(meshes.add(Capsule2d::new(TRIGGER_ZONE_DIVIDER_RADIUS, LENGTH)))
-        .collider(Collider::capsule_y(
-            LENGTH / 2.0,
-            TRIGGER_ZONE_DIVIDER_RADIUS,
-        ));
+    let divider_template = ObstacleBundle {
+        matmesh: MaterialMesh2dBundle {
+            material: materials.add(TRIGGER_ZONE_DIVIDER_COLOR),
+            mesh: Mesh2dHandle(meshes.add(Capsule2d::new(TRIGGER_ZONE_DIVIDER_RADIUS, LENGTH))),
+            transform: Transform::from_xyz(0.0, 0.0, TRIGGER_ZONE_DIVIDER_Z),
+            ..default()
+        },
+        collider: Collider::capsule_y(LENGTH / 2.0, TRIGGER_ZONE_DIVIDER_RADIUS),
+        collision_groups: CollisionGroups::new(
+            collision_groups::PANEL_OBSTACLES,
+            collision_groups::PANEL_BALLS,
+        ),
+        rigidbody: RigidBody::Fixed,
+        name: Name::from("Trigger Zone Divider"),
+    };
 
     let mut f = |root: Entity| {
         for i in 0..CIRCLE_PYRAMID_VERTICAL_COUNT {
@@ -468,33 +390,33 @@ fn setup(
                 + CIRCLE_PYRAMID_VERTICAL_OFFSET;
             if i % 2 == 0 {
                 commands
-                    .spawn(circle_builder.clone().xy(0.0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(0.0, y))
                     .set_parent(root);
 
                 for j in 1..=i / 2 {
                     let x = j as f32 * (CIRCLE_DIAMETER + CIRCLE_PYRAMID_HORIZONTAL_GAP);
                     commands
-                        .spawn(circle_builder.clone().xy(x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(x, y))
                         .set_parent(root);
                     commands
-                        .spawn(circle_builder.clone().xy(-x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(-x, y))
                         .set_parent(root);
                 }
             } else {
                 let x0 = CIRCLE_HALF_GAP + CIRCLE_RADIUS;
                 commands
-                    .spawn(circle_builder.clone().xy(x0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(x0, y))
                     .set_parent(root);
                 commands
-                    .spawn(circle_builder.clone().xy(-x0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(-x0, y))
                     .set_parent(root);
                 for j in 1..(i / 2) + 1 {
                     let x = j as f32 * (CIRCLE_DIAMETER + CIRCLE_PYRAMID_HORIZONTAL_GAP) + x0;
                     commands
-                        .spawn(circle_builder.clone().xy(x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(x, y))
                         .set_parent(root);
                     commands
-                        .spawn(circle_builder.clone().xy(-x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(-x, y))
                         .set_parent(root);
                 }
             }
@@ -505,33 +427,33 @@ fn setup(
                 + CIRCLE_GRID_VERTICAL_OFFSET;
             if i % 2 == 0 {
                 commands
-                    .spawn(circle_builder.clone().xy(0.0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(0.0, y))
                     .set_parent(root);
 
                 for j in 1..=CIRCLE_GRID_HORIZONTAL_HALF_COUNT_EVEN_ROW {
                     let x = j as f32 * (CIRCLE_DIAMETER + CIRCLE_GRID_HORIZONTAL_GAP);
                     commands
-                        .spawn(circle_builder.clone().xy(x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(x, y))
                         .set_parent(root);
                     commands
-                        .spawn(circle_builder.clone().xy(-x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(-x, y))
                         .set_parent(root);
                 }
             } else {
                 let x0 = CIRCLE_HALF_GAP + CIRCLE_RADIUS;
                 commands
-                    .spawn(circle_builder.clone().xy(x0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(x0, y))
                     .set_parent(root);
                 commands
-                    .spawn(circle_builder.clone().xy(-x0, y).buildtmb())
+                    .spawn(circle_template.clone().with_xy(-x0, y))
                     .set_parent(root);
                 for j in 1..CIRCLE_GRID_HORIZONTAL_HALF_COUNT_ODD_ROW {
                     let x = j as f32 * (CIRCLE_DIAMETER + CIRCLE_GRID_HORIZONTAL_GAP) + x0;
                     commands
-                        .spawn(circle_builder.clone().xy(x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(x, y))
                         .set_parent(root);
                     commands
-                        .spawn(circle_builder.clone().xy(-x, y).buildtmb())
+                        .spawn(circle_template.clone().with_xy(-x, y))
                         .set_parent(root);
                 }
             }
@@ -539,34 +461,30 @@ fn setup(
 
         commands
             .spawn(
-                divider_builder
+                divider_template
                     .clone()
-                    .xy(-ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y)
-                    .buildtmb(),
+                    .with_xy(-ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y),
             )
             .set_parent(root);
         commands
             .spawn(
-                divider_builder
+                divider_template
                     .clone()
-                    .xy(-ARENA_WIDTH_FRAC_5 - ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y)
-                    .buildtmb(),
+                    .with_xy(-ARENA_WIDTH_FRAC_5 - ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y),
             )
             .set_parent(root);
         commands
             .spawn(
-                divider_builder
+                divider_template
                     .clone()
-                    .xy(ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y)
-                    .buildtmb(),
+                    .with_xy(ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y),
             )
             .set_parent(root);
         commands
             .spawn(
-                divider_builder
+                divider_template
                     .clone()
-                    .xy(ARENA_WIDTH_FRAC_5 + ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y)
-                    .buildtmb(),
+                    .with_xy(ARENA_WIDTH_FRAC_5 + ARENA_WIDTH_FRAC_10, TRIGGER_ZONE_Y),
             )
             .set_parent(root);
         let mut f = |trigger_type, x, color| {
@@ -668,7 +586,8 @@ fn spawn_workers(
     rapier: Res<RapierContext>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
     survivors: Res<ParticipantMap<bool>>,
-    root: Query<(Entity, &GlobalTransform, &PanelRoot)>,
+    left_root: Query<(Entity, &GlobalTransform), With<LeftPanelRoot>>,
+    right_root: Query<(Entity, &GlobalTransform), With<RightPanelRoot>>,
     effect: Res<TrailEffect>,
     mut trail_query: Query<(Entity, &mut EffectProperties, &InactiveWorkerBallTrail)>,
 ) {
@@ -755,26 +674,20 @@ fn spawn_workers(
             }
         }
     };
-    let &[root0, root1] = root.into_iter().collect::<Vec<_>>().as_slice() else {
-        panic!("{}", EXPECT_TWO_PANELS_MSG);
-    };
-    let (left_root, right_root) = match (root0.2 .0, root1.2 .0) {
-        (PanelRootSide::Left, PanelRootSide::Right) => (root0, root1),
-        (PanelRootSide::Right, PanelRootSide::Left) => (root1, root0),
-        _ => panic!("{}", EXPECT_EACH_PANEL_SIDE_EXIST_MSG),
-    };
+    let (left_root_entity, left_root_transform) = left_root.single();
+    let (right_root_entity, right_root_transform) = right_root.single();
     f(
         Participant::A,
         Participant::B,
-        left_root.0,
-        left_root.1,
+        left_root_entity,
+        left_root_transform,
         true,
     );
     f(
         Participant::C,
         Participant::D,
-        right_root.0,
-        right_root.1,
+        right_root_entity,
+        right_root_transform,
         false,
     );
     spawner.counter += 1;
@@ -842,7 +755,8 @@ fn trigger_event(
 fn reset_workers(
     mut collision_events: EventReader<CollisionEvent>,
     rapier: Res<RapierContext>,
-    root_query: Query<(&GlobalTransform, &PanelRoot)>,
+    left_root: Query<&GlobalTransform, With<LeftPanelRoot>>,
+    right_root: Query<&GlobalTransform, With<RightPanelRoot>>,
     trigger_zone_query: Query<(), With<TriggerType>>,
     mut worker_ball_query: Query<
         (&mut Transform, &mut Velocity, &Collider, &Participant),
@@ -866,13 +780,10 @@ fn reset_workers(
                     continue;
                 };
 
-                let target_side = PanelRootSide::for_participant(participant);
-                let root = root_query
-                    .into_iter()
-                    .find_map(|(transform, &PanelRoot(side))| {
-                        (side == target_side).then_some(transform)
-                    })
-                    .expect(EXPECT_EACH_PANEL_SIDE_EXIST_MSG);
+                let root = match participant {
+                    Participant::A | Participant::B => left_root.single(),
+                    Participant::C | Participant::D => right_root.single(),
+                };
                 let x = WorkerBallShapeCaster::new(
                     root.translation().xy(),
                     Uniform::new(-ARENA_WIDTH_FRAC_2, ARENA_WIDTH_FRAC_2),

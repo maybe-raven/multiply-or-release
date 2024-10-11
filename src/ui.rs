@@ -12,11 +12,10 @@ impl Plugin for UIPlugin {
         app.add_systems(Startup, setup).add_systems(
             Update,
             (
-                button_system.run_if(not(game_is_going)),
                 restart.run_if(on_event::<RestartEvent>()),
                 add_elimination_text.run_if(on_event::<EliminationEvent>()),
                 remove_elimination_text.run_if(any_with_component::<EliminationTextTimer>),
-                add_game_over_text.run_if(not(game_is_going)),
+                (button_system, add_game_over_text).run_if(not(game_is_going)),
             ),
         );
     }
@@ -190,11 +189,9 @@ fn add_game_over_text(
 }
 fn restart(
     mut commands: Commands,
-    query: Query<&Children, With<UIRoot>>,
+    query: Query<Entity, With<UIRoot>>,
     mut button_visibility: Query<&mut Visibility, With<RestartButton>>,
 ) {
-    for &child in query.single().iter() {
-        commands.entity(child).despawn_recursive();
-        *button_visibility.single_mut() = Visibility::Hidden;
-    }
+    commands.entity(query.single()).despawn_descendants();
+    *button_visibility.single_mut() = Visibility::Hidden;
 }
