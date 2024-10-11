@@ -44,9 +44,9 @@ impl Plugin for EffectsPlugin {
                         .before(spawn_workers),
                     trigger_tile_hit_effect
                         .run_if(on_event::<TileHitEvent>().or_else(on_event::<RestartEvent>())),
-                    restart.run_if(on_event::<RestartEvent>()),
                 ),
-            );
+            )
+            .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()));
     }
 }
 #[derive(Clone, Resource)]
@@ -317,13 +317,14 @@ fn update_worker_trail_position(
             // Despawning the particle effect causes immense lag for some reason,
             // so instead we just leave it running but make it invisible
             let mut trail = commands.entity(trail_entity);
-            if *go_left {
-                trail.insert(InactiveLeftWorkerBallTrail)
+            trail.remove::<WorkerBallTrail>();
+            let x = if *go_left {
+                trail.insert(InactiveLeftWorkerBallTrail);
+                LEFT_ROOT_X
             } else {
-                trail.insert(InactiveRightWorkerBallTrail)
-            }
-            .remove::<WorkerBallTrail>();
-            let x = if *go_left { LEFT_ROOT_X } else { RIGHT_ROOT_X };
+                trail.insert(InactiveRightWorkerBallTrail);
+                RIGHT_ROOT_X
+            };
             properties.set_spawn_color(LinearRgba::NONE);
             properties.set_position(Vec3::new(x, WORKER_BALL_SPAWN_Y, 0.0));
             *go_left = !*go_left;

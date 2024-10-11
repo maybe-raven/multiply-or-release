@@ -9,15 +9,16 @@ use bevy::prelude::*;
 pub struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(
-            Update,
-            (
-                restart.run_if(on_event::<RestartEvent>()),
-                add_elimination_text.run_if(on_event::<EliminationEvent>()),
-                remove_elimination_text.run_if(any_with_component::<EliminationTextTimer>),
-                (button_system, add_game_over_text).run_if(not(game_is_going)),
-            ),
-        );
+        app.add_systems(Startup, setup)
+            .add_systems(
+                Update,
+                (
+                    add_elimination_text.run_if(on_event::<EliminationEvent>()),
+                    remove_elimination_text.run_if(any_with_component::<EliminationTextTimer>),
+                    (restart_button_system, add_game_over_text).run_if(not(game_is_going)),
+                ),
+            )
+            .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()));
     }
 }
 
@@ -113,7 +114,7 @@ fn setup(mut commands: Commands) {
         ))
         .set_parent(button);
 }
-fn button_system(
+fn restart_button_system(
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &mut BorderColor),
         (Changed<Interaction>, With<Button>),
@@ -124,8 +125,6 @@ fn button_system(
         match *interaction {
             Interaction::Pressed => {
                 events.send_default();
-                // *color = PRESSED_BUTTON.into();
-                // border_color.0 = RED.into();
             }
             Interaction::Hovered => {
                 *color = HOVERED_BUTTON.into();

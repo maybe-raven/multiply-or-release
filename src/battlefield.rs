@@ -76,9 +76,9 @@ impl Plugin for BattlefieldPlugin {
                     handle_elimination
                         .run_if(on_event::<EliminationEvent>())
                         .after(update_charge_level),
-                    restart.run_if(on_event::<RestartEvent>()),
                 ),
             )
+            .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()))
             .add_systems(
                 FixedUpdate,
                 (

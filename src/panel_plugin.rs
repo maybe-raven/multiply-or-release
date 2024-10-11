@@ -104,9 +104,9 @@ impl Plugin for PanelPlugin {
                     reset_workers.run_if(game_is_going),
                     trigger_event
                         .run_if(on_event::<CollisionEvent>().or_else(on_event::<RestartEvent>())),
-                    restart.run_if(on_event::<RestartEvent>()),
                 ),
-            );
+            )
+            .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()));
     }
 }
 
