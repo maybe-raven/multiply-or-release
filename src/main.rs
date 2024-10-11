@@ -1,7 +1,7 @@
 use battlefield::BattlefieldPlugin;
 use bevy::{prelude::*, render::camera::ScalingMode};
-use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
+use effects::EffectPlugin;
 use panel_plugin::PanelPlugin;
 use ui::UIPlugin;
 use utils::{Participant, UtilsPlugin};
@@ -9,6 +9,7 @@ use utils::{Participant, UtilsPlugin};
 mod battlefield;
 mod collision_groups;
 mod debug_utils;
+mod effects;
 mod panel_plugin;
 mod ui;
 mod utils;
@@ -27,8 +28,13 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(window_plugin))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(HanabiPlugin)
-        .add_plugins((UtilsPlugin, PanelPlugin, BattlefieldPlugin, UIPlugin))
+        .add_plugins((
+            UtilsPlugin,
+            EffectPlugin,
+            PanelPlugin,
+            BattlefieldPlugin,
+            UIPlugin,
+        ))
         // .add_plugins(debug_utils::DebugUtilsPlugin)
         .add_systems(Startup, setup)
         .run();

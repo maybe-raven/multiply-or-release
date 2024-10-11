@@ -6,8 +6,9 @@ use rand::{distributions::Uniform, prelude::*};
 
 use crate::{
     battlefield::{EliminationEvent, BATTLEFIELD_HALF_WIDTH},
+    effects::TileHitEffect,
     panel_plugin::{TriggerEvent, TriggerType},
-    utils::{BallColor, Participant, ParticipantMap, TileHitEffect},
+    utils::{BallColor, Participant, ParticipantMap},
 };
 
 pub struct DebugUtilsPlugin;

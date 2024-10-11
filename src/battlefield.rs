@@ -11,10 +11,9 @@ use bevy_rapier2d::prelude::*;
 
 use crate::{
     collision_groups::{self, all_new_bullets_except},
+    effects::{EffectPropertiesExt, TileHitEffect},
     panel_plugin::{TriggerEvent, TriggerType},
-    utils::{
-        BallColor, EffectPropertiesExt, Participant, ParticipantMap, TileColor, TileHitEffect,
-    },
+    utils::{BallColor, Participant, ParticipantMap, TileColor},
 };
 
 // Constants {{{

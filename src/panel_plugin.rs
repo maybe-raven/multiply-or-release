@@ -3,7 +3,8 @@
 use crate::{
     battlefield::{game_is_going, RestartEvent},
     collision_groups::{self, PANEL_OBSTACLES, PANEL_TRIGGER_ZONES},
-    utils::{EffectPropertiesExt, ParticipantMap, TileColor, TrailEffect, TRAIL_LIFETIME},
+    effects::{EffectPropertiesExt, TrailEffect, TRAIL_LIFETIME},
+    utils::{ParticipantMap, TileColor},
     Participant,
 };
 use bevy::{
