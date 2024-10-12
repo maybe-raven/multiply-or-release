@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/b6568097-09f6-4d65-9571-ae0c628ff452
 
 ## How to Run
 
-This game has no releases yet, but you can clone this repo and build it locally.
+### Building Locally
 
 1. Install Rust by following the [Rust Getting Started Guide](https://www.rust-lang.org/learn/get-startedA).
 2. Clone this repo `git clone --depth=1 https://github.com/maybe-raven/multiply-or-release`.
@@ -25,6 +25,15 @@ This game has no releases yet, but you can clone this repo and build it locally.
 
 > [!Warning]
 > I only have a MacBook so it's only tested on MacOS. I have no idea how well it'll fare on other operating systems.
+
+### Itch.io
+
+You can find this game on Itch.io [here](https://maybe-raven.itch.io/multiply-or-release).
+
+> [!Info] About Particle Effects
+> This game uses [`bevy_hanabi`](https://crates.io/crates/bevy_hanabi/0.12.2) for particle effects. However, the stable version of `bevy_hanabi` at the time didn't support WASM yet, so the web build will not have pretty visuals.
+
+I think they do have WASM support now. I'll update it at some point.
 
 ## License
 
