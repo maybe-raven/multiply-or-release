@@ -34,6 +34,9 @@ const TURRET_HEAD_COLOR: Color = Color::Srgba(css::DARK_GRAY);
 const TURRET_HEAD_THICNESS: f32 = 3.0;
 const TURRET_HEAD_LENGTH: f32 = 50.0;
 const TURRET_ROTATION_SPEED: f32 = 0.75;
+const PRIMARY_TURRET_TRACKING_DISTANCE: f32 = 300.0;
+const PRIMARY_TURRET_TRACKING_LEVEL_THRESHOLD: u64 = 9;
+const SECONDARY_TURRET_TRACKING_DISTANCE: f32 = 100.0;
 
 const MULTI_SHOT_CHARGE_OFFSET: u64 = 8;
 
@@ -43,7 +46,7 @@ const BULLET_TEXT_COLOR: Color = Color::BLACK;
 const BULLET_TEXT_FONT_SIZE_ASPECT: f32 = 0.5;
 const BULLET_MINIMUM_TEXT_SIZE: f32 = 8.0;
 const BULLET_SIZE_FACTOR: f32 = 2.0;
-const BULLET_MASS_FACTOR: f32 = 2.0;
+const BULLET_MASS_FACTOR: f32 = 1.0;
 const BULLET_RESTITUTION_COEFFICIENT: f32 = 0.75;
 const CHARGED_SHOT_BULLET_SPEED: f32 = 250.0;
 const BURST_SHOT_BULLET_SPEED: f32 = 500.0;
@@ -71,7 +74,7 @@ impl Plugin for BattlefieldPlugin {
             .add_systems(
                 Update,
                 (
-                    rotate_turret,
+                    (update_barrel_offset, rotate_turret).chain(),
                     handle_bullet_tile_collision,
                     handle_bullet_turret_collision.after(handle_bullet_tile_collision),
                     handle_trigger_events
@@ -442,23 +445,36 @@ impl TurretBarrelBundle {
         }
     }
 }
-#[derive(Component)]
+#[derive(Clone, Copy, Component)]
 struct TurretPlatformLink(Entity);
 /// Component for a turret.
-#[derive(Component, Default)]
-struct BarrelOffset(f32);
+#[derive(Component, Default, Clone, Copy)]
+struct BarrelOffset {
+    base_angle: f32,
+    current_angle: f32,
+}
+impl BarrelOffset {
+    fn new(base_angle: f32) -> Self {
+        Self {
+            base_angle,
+            current_angle: base_angle,
+        }
+    }
+}
 /// Component bundle for a turret.
 #[derive(Bundle, Default)]
 struct TurretPlatformBundle {
     barrel_offset: BarrelOffset,
+    participant: Participant,
     spatial: SpatialBundle,
     name: Name,
 }
 impl TurretPlatformBundle {
-    fn new(base_offset: f32) -> Self {
+    fn new(base_offset: f32, participant: Participant) -> Self {
         Self {
             name: Name::new("Turret Platform"),
-            barrel_offset: BarrelOffset(base_offset),
+            participant,
+            barrel_offset: BarrelOffset::new(base_offset),
             spatial: SpatialBundle::from_transform(Transform::from_xyz(
                 0.0,
                 0.0,
@@ -517,17 +533,49 @@ fn setup(
     commands.insert_resource(maps);
     commands.insert_resource(BulletMesh(mesh));
 }
-fn rotate_turret(
+fn update_barrel_offset(
     time: Res<Time>,
+    bullets: Query<(&GlobalTransform, &Charge, &Participant), With<Bullet>>,
     mut stopwatch: ResMut<TurretStopwatch>,
-    mut turrets: Query<(&mut Transform, &BarrelOffset)>,
+    mut turrets: Query<(&GlobalTransform, &mut BarrelOffset, &Participant)>,
 ) {
+    const PRIMARY_DISTANCE_SQUARED: f32 =
+        PRIMARY_TURRET_TRACKING_DISTANCE * PRIMARY_TURRET_TRACKING_DISTANCE;
+    const SECONDARY_DISTANCE_SQUARED: f32 =
+        SECONDARY_TURRET_TRACKING_DISTANCE * SECONDARY_TURRET_TRACKING_DISTANCE;
     stopwatch.0.tick(time.delta());
     let angle_offset = stopwatch.get();
-    for (mut transform, &BarrelOffset(base_offset)) in &mut turrets {
-        *transform = transform.with_rotation(Quat::from_rotation_z(base_offset + angle_offset));
+    for (turret_transform, mut barrel_offset, &turret_participant) in turrets.iter_mut() {
+        let turret_xy = turret_transform.translation().xy();
+        if let Some((bullet_xy, _)) = bullets
+            .iter()
+            .filter_map(|(bullet_transform, bullet_charge, &bullet_participant)| {
+                let bullet_xy = bullet_transform.translation().xy();
+                let distance = bullet_xy.distance_squared(turret_xy);
+                if bullet_participant == turret_participant {
+                    None
+                } else if distance < SECONDARY_DISTANCE_SQUARED {
+                    Some((bullet_xy, distance))
+                } else {
+                    (distance < PRIMARY_DISTANCE_SQUARED
+                        && bullet_charge.level > PRIMARY_TURRET_TRACKING_LEVEL_THRESHOLD)
+                        .then_some((bullet_xy, distance))
+                }
+            })
+            .min_by(|(_, distance_a), (_, distance_b)| distance_a.total_cmp(distance_b))
+        {
+            barrel_offset.current_angle = (bullet_xy - turret_xy).to_angle();
+        } else {
+            barrel_offset.current_angle = barrel_offset.base_angle + angle_offset;
+        }
     }
 }
+fn rotate_turret(mut query: Query<(&mut Transform, &BarrelOffset)>) {
+    for (mut transform, barrel_offset) in query.iter_mut() {
+        transform.rotation = Quat::from_rotation_z(barrel_offset.current_angle);
+    }
+}
+
 fn update_charge_level(
     mut commands: Commands,
     mut query: Query<(Entity, &mut Charge, &Participant, Option<&Turret>), Changed<Charge>>,
@@ -577,7 +625,7 @@ fn setup_turrets(
             ))
             .id();
         let platform = commands
-            .spawn(TurretPlatformBundle::new(base_offset))
+            .spawn(TurretPlatformBundle::new(base_offset, owner))
             .set_parent(root)
             .id();
         commands
@@ -693,7 +741,6 @@ fn fire_shots(
     mut commands: Commands,
     mesh: Res<BulletMesh>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
-    turret_stopwatch: Res<TurretStopwatch>,
     mut turrets: Query<(&mut Turret, &Transform, &Participant, &TurretPlatformLink)>,
     platform_query: Query<&BarrelOffset>,
     battlefield_root: Query<Entity, With<BattlefieldRoot>>,
@@ -739,7 +786,7 @@ fn fire_shots(
                 (shot, offset, BURST_SHOT_BULLET_SPEED)
             }
         };
-        let &BarrelOffset(base_angle) = platform_query.get(link).unwrap();
+        let barrel_offset = platform_query.get(link).unwrap();
         let ball = commands
             .spawn(ChargeBallBundle::new(
                 mesh.clone(),
@@ -752,7 +799,7 @@ fn fire_shots(
                 transform.translation.xy() - offset,
                 ball,
                 charge,
-                turret_stopwatch.get() + base_angle,
+                barrel_offset.current_angle,
                 bullet_speed,
             ))
             .set_parent(battlefield_root.single())
