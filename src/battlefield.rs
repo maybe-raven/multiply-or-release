@@ -75,13 +75,15 @@ impl Plugin for BattlefieldPlugin {
                 Update,
                 (
                     (update_barrel_offset, rotate_turret).chain(),
-                    handle_bullet_tile_collision,
-                    handle_bullet_turret_collision.after(handle_bullet_tile_collision),
-                    handle_trigger_events
-                        .after(handle_bullet_turret_collision)
-                        .run_if(on_event::<TriggerEvent>().or_else(on_event::<RestartEvent>())),
-                    update_charge_level.after(handle_trigger_events),
-                    update_charge_ball.after(update_charge_level),
+                    (
+                        handle_bullet_tile_collision,
+                        handle_bullet_turret_collision,
+                        handle_trigger_events
+                            .run_if(on_event::<TriggerEvent>().or_else(on_event::<RestartEvent>())),
+                        update_charge_level,
+                        update_charge_ball,
+                    )
+                        .chain(),
                     handle_elimination
                         .run_if(on_event::<EliminationEvent>())
                         .after(update_charge_level),
