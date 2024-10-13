@@ -1,7 +1,7 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 use crate::{
-    collision_groups::{self, all_new_bullets_except},
+    collision_groups::{self},
     panel_plugin::{TriggerEvent, TriggerType},
     participants::{Participant, ParticipantMap, TILE_COLORS},
 };
@@ -10,15 +10,18 @@ use bevy_rapier2d::prelude::*;
 use std::{
     collections::VecDeque,
     f32::consts::{FRAC_PI_2, PI},
+    ops::{ControlFlow, Index, IndexMut},
 };
 
 // Constants {{{
 
 #[cfg(not(target_family = "wasm"))]
-const TILE_COUNT: usize = 100;
+const HALF_TILE_COUNT: usize = 100;
 #[cfg(target_family = "wasm")]
-const TILE_COUNT: usize = 69;
-const TILE_DIMENSION: f32 = BATTLEFIELD_HALF_WIDTH / TILE_COUNT as f32;
+const HALF_TILE_COUNT: usize = 69;
+const HALF_TILE_COUNT_I32: i32 = HALF_TILE_COUNT as i32;
+const TILE_COUNT: usize = HALF_TILE_COUNT * 2;
+const TILE_DIMENSION: f32 = BATTLEFIELD_HALF_WIDTH / HALF_TILE_COUNT as f32;
 pub const BATTLEFIELD_HALF_WIDTH: f32 = 360.0;
 const BATTLEFIELD_BOUNDARY_HALF_WIDTH: f32 = 50.0;
 
@@ -76,7 +79,6 @@ impl Plugin for BattlefieldPlugin {
                 (
                     (update_barrel_offset, rotate_turret).chain(),
                     (
-                        handle_bullet_tile_collision,
                         handle_bullet_turret_collision,
                         handle_trigger_events
                             .run_if(on_event::<TriggerEvent>().or_else(on_event::<RestartEvent>())),
@@ -93,6 +95,7 @@ impl Plugin for BattlefieldPlugin {
             .add_systems(
                 FixedUpdate,
                 (
+                    update_tile_grid,
                     update_bullets_solver_groups.before(fire_shots),
                     fire_shots
                         .run_if(game_is_going)
@@ -131,6 +134,38 @@ impl Default for SurvivorCount {
 struct BattlefieldRoot;
 #[derive(Component, Clone, Copy)]
 struct TileRoot;
+#[derive(Resource)]
+struct TileGrid(Box<[[Entity; TILE_COUNT]; TILE_COUNT]>);
+impl TileGrid {
+    /// Check if the given value can be a valid coordinate value for a [`TileGrid`].
+    fn check(i: i32) -> bool {
+        (-HALF_TILE_COUNT_I32..HALF_TILE_COUNT_I32).contains(&i)
+    }
+    /// Return the value at the given coordinates or `None` if the coordinates are not valid.
+    fn get(&self, x: i32, y: i32) -> Option<Entity> {
+        (Self::check(x) && Self::check(y)).then(|| self[(x, y)])
+    }
+}
+impl Default for TileGrid {
+    fn default() -> Self {
+        Self(Box::new([[Entity::PLACEHOLDER; TILE_COUNT]; TILE_COUNT]))
+    }
+}
+impl Index<(i32, i32)> for TileGrid {
+    type Output = Entity;
+    fn index(&self, (x, y): (i32, i32)) -> &Self::Output {
+        self.0
+            .index((HALF_TILE_COUNT_I32 + x) as usize)
+            .index((HALF_TILE_COUNT_I32 + y) as usize)
+    }
+}
+impl IndexMut<(i32, i32)> for TileGrid {
+    fn index_mut(&mut self, (x, y): (i32, i32)) -> &mut Self::Output {
+        self.0
+            .index_mut((HALF_TILE_COUNT_I32 + x) as usize)
+            .index_mut((HALF_TILE_COUNT_I32 + y) as usize)
+    }
+}
 /// Marker to mark this entity as a tile.
 #[derive(Component, Clone, Copy)]
 pub struct Tile;
@@ -139,13 +174,9 @@ pub struct Tile;
 struct TileBundle {
     /// Markers to mark this entity as a tile, a sensor collider, and a trigger for collision
     /// events.
-    markers: (Tile, Sensor),
+    markers: Tile,
     /// Bevy rendering component used to display the tile.
     sprite_bundle: SpriteBundle,
-    /// Rapier collider component. We'll mark this as sensor and won't add a rigidbody to this
-    /// entity because we don't actually want the physics engine to move itl.
-    collider: Collider,
-    collision_groups: CollisionGroups,
     /// The game participant that owns this tile.
     owner: Participant,
     name: Name,
@@ -153,7 +184,7 @@ struct TileBundle {
 impl TileBundle {
     fn new(owner: Participant, color: impl Into<Color>, x: f32, y: f32) -> Self {
         Self {
-            markers: (Tile, Sensor),
+            markers: Tile,
             sprite_bundle: SpriteBundle {
                 transform: Transform {
                     translation: Vec3::new(x, y, TILE_Z),
@@ -166,12 +197,6 @@ impl TileBundle {
                 },
                 ..default()
             },
-            collider: Collider::cuboid(0.5, 0.5),
-            collision_groups: CollisionGroups::new(
-                collision_groups::tile(owner),
-                collision_groups::all_bullets_except(owner)
-                    | collision_groups::all_new_bullets_except(owner),
-            ),
             owner,
             name: Name::new("Tile"),
         }
@@ -529,9 +554,11 @@ fn setup(
         .spawn((Name::new("Tile Root"), (TileRoot, SpatialBundle::default())))
         .set_parent(root)
         .id();
-    setup_tiles(&mut commands, tile_root);
+    let mut tile_grid = TileGrid::default();
+    setup_tiles(&mut commands, tile_root, &mut tile_grid);
     let mesh = Mesh2dHandle(meshes.add(Circle::new(1.0)));
     let maps = setup_turrets(&mut commands, root, mesh.clone(), &materials);
+    commands.insert_resource(tile_grid);
     commands.insert_resource(maps);
     commands.insert_resource(BulletMesh(mesh));
 }
@@ -593,23 +620,27 @@ fn update_charge_level(
         }
     }
 }
-fn setup_tiles(commands: &mut Commands, tile_root: Entity) {
-    for i in 0..TILE_COUNT {
+fn setup_tiles(commands: &mut Commands, tile_root: Entity, tile_grid: &mut TileGrid) {
+    for i in 0..HALF_TILE_COUNT_I32 {
         let x = TILE_DIMENSION / 2.0 + i as f32 * TILE_DIMENSION;
-        for j in 0..TILE_COUNT {
+        for j in 0..HALF_TILE_COUNT_I32 {
             let y = TILE_DIMENSION / 2.0 + j as f32 * TILE_DIMENSION;
-            commands
+            tile_grid[(i, j)] = commands
                 .spawn(TileBundle::new(Participant::A, TILE_COLORS.a, x, y))
-                .set_parent(tile_root);
-            commands
+                .set_parent(tile_root)
+                .id();
+            tile_grid[(-1 - i, j)] = commands
                 .spawn(TileBundle::new(Participant::B, TILE_COLORS.b, -x, y))
-                .set_parent(tile_root);
-            commands
+                .set_parent(tile_root)
+                .id();
+            tile_grid[(i, -1 - j)] = commands
                 .spawn(TileBundle::new(Participant::C, TILE_COLORS.c, x, -y))
-                .set_parent(tile_root);
-            commands
+                .set_parent(tile_root)
+                .id();
+            tile_grid[(-1 - i, -1 - j)] = commands
                 .spawn(TileBundle::new(Participant::D, TILE_COLORS.d, -x, -y))
-                .set_parent(tile_root);
+                .set_parent(tile_root)
+                .id();
         }
     }
 }
@@ -899,61 +930,163 @@ fn handle_elimination(
         }
     }
 }
-fn handle_bullet_tile_collision(
-    mut collision_events: EventReader<CollisionEvent>,
+fn update_tile_grid(
+    time: Res<Time<Fixed>>,
+    tile_grid: ResMut<TileGrid>,
     mut tile_hit_events: EventWriter<TileHitEvent>,
-    mut bullet_query: Query<(&Participant, &mut Charge, &Velocity), With<Bullet>>,
-    mut tile_query: Query<
-        (
-            &mut Participant,
-            &mut Sprite,
-            &mut CollisionGroups,
-            &GlobalTransform,
-        ),
-        (With<Tile>, Without<Bullet>),
-    >,
+    mut tile_query: Query<(&mut Participant, &mut Sprite, &GlobalTransform), Without<Bullet>>,
+    mut bullets: Query<(&Transform, &Participant, &mut Charge, &Velocity), With<Bullet>>,
+    mut hits: Local<Vec<TileHitEvent>>,
 ) {
-    for event in collision_events.read() {
-        match event {
-            &CollisionEvent::Started(a, b, _) => {
-                let (&bullet_owner, mut charge, velocity) = if let Ok(x) = bullet_query.get_mut(a) {
-                    x
-                } else if let Ok(x) = bullet_query.get_mut(b) {
-                    x
-                } else {
-                    continue;
-                };
-                let (mut tile_owner, mut sprite, mut collision_group, transform) =
-                    if let Ok(x) = tile_query.get_mut(a) {
-                        x
-                    } else if let Ok(x) = tile_query.get_mut(b) {
-                        x
-                    } else {
-                        continue;
-                    };
-                if bullet_owner == *tile_owner {
-                    continue;
-                }
-                if charge.value == 0 {
-                    continue;
-                }
-                *tile_owner = bullet_owner;
-                sprite.color = Color::from(TILE_COLORS[bullet_owner]);
-                *collision_group = CollisionGroups::new(
-                    collision_groups::tile(bullet_owner),
-                    collision_groups::all_bullets_except(bullet_owner)
-                        | all_new_bullets_except(bullet_owner),
-                );
-                charge.value -= 1;
-                tile_hit_events.send(TileHitEvent {
-                    position: transform.translation(),
-                    participant: bullet_owner,
-                    bullet_velocity: velocity.linvel,
-                });
+    for (transform, &bullet_participant, mut charge, velocity) in bullets.iter_mut() {
+        if charge.value == 0 {
+            continue;
+        }
+
+        // TODO: implement a polygon/rectangle drawing algorithm for cases where
+        // bullet diameter < 5 (the circle rasterization algorithm does not fill in very
+        // well in low-res situation),
+        // or if `charge.value` is significantly less than the bullet's area (circle rasterization
+        // algorithm does not have strong directionality; can only realy choose going from inside
+        // to outside or from outside to inside; if a bullet is likely to run out of charge before
+        // covering the entire area, then it's better to use an algorithm that scans from a defined
+        // to starting point to end point),
+        // or the distance it's travelled since the last tick is greater than its diameter (to
+        // avoid tunneling).
+
+        // circle rasterization
+        // https://en.wikipedia.org/wiki/Midpoint_circle_algorithm#Jesko's_Method
+
+        // Scale everything down to where each tile is 1x1 (a single pixel)
+        // If 0.0 < r <= 1.0 (which means r.ceil() - 1 == 0), then it affects a single tile.
+        let bullet_radius = (charge.get_scale() / TILE_DIMENSION).ceil() as i32 - 1;
+        // World position (0.0, 0.0) is a point and does not correspond to any tile;
+        // the range of ([0.0, 1.0], [0.0, 1.0]) correspond to tile (0, 0);
+        // the range of ([-1.0, 0.0], [-1.0, 0.0]) correspond to tile (-1, -1).
+        let bullet_position = (transform.translation.xy() / TILE_DIMENSION)
+            .floor()
+            .as_ivec2();
+
+        // Process the tile at the given positional offset from `bullet_position`.
+        let mut process_tile = |x: i32, y: i32| {
+            if charge.value == 0 {
+                return ControlFlow::Break(());
             }
-            CollisionEvent::Stopped(_, _, _) => (),
+            let Some(tile) = tile_grid.get(bullet_position.x + x, bullet_position.y + y) else {
+                return ControlFlow::Continue(());
+            };
+            let (mut tile_participant, mut tile_sprite, tile_transform) = tile_query
+                .get_mut(tile)
+                .expect("Entities stored in `TileGrid` should be a valid `TileBundle`.");
+            if *tile_participant == bullet_participant {
+                return ControlFlow::Continue(());
+            }
+            charge.value -= 1;
+            *tile_participant = bullet_participant;
+            tile_sprite.color = Color::from(TILE_COLORS[bullet_participant]);
+            hits.push(TileHitEvent {
+                position: tile_transform.translation(),
+                participant: bullet_participant,
+                bullet_velocity: velocity.linvel,
+            });
+            ControlFlow::Continue(())
+        };
+
+        if bullet_radius == 0 {
+            let last_position = ((-velocity.linvel) * time.timestep().as_secs_f32()
+                / TILE_DIMENSION)
+                .ceil()
+                .as_ivec2()
+                - 1;
+            if last_position == bullet_position {
+                process_tile(bullet_position.x, bullet_position.y);
+                continue;
+            }
+            let IVec2 {
+                x: mut x0,
+                y: mut y0,
+            } = last_position;
+            // Line drawing algorithm:
+            // https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm#All_cases
+            let dx = (-x0).abs();
+            let dy = -(-y0).abs();
+            let sx = (-x0).signum();
+            let sy = (-y0).signum();
+            let mut err = dx + dy;
+            loop {
+                if let ControlFlow::Break(()) = process_tile(x0, y0) {
+                    break;
+                }
+                if x0 == 0 && y0 == 0 {
+                    break;
+                }
+                let e2 = 2 * err;
+                if e2 >= dy {
+                    err += dy;
+                    x0 += sx;
+                    if let ControlFlow::Break(()) = process_tile(x0, y0) {
+                        break;
+                    }
+                }
+                if e2 <= dx {
+                    err += dx;
+                    y0 += sy;
+                }
+            }
+            continue;
+        }
+
+        let mut x = bullet_radius;
+        let cf = (|| {
+            process_tile(0, 0)?;
+            for i in 1..=x {
+                process_tile(i, 0)?;
+                process_tile(-i, 0)?;
+                process_tile(0, i)?;
+                process_tile(0, -i)?;
+            }
+            ControlFlow::Continue(())
+        })();
+        if let ControlFlow::Break(()) = cf {
+            continue;
+        }
+
+        let mut y = 0;
+        let mut t1 = bullet_radius / 16;
+        loop {
+            y += 1;
+            t1 += y;
+            let t2 = t1 - x;
+            if t2 >= 0 {
+                t1 = t2;
+                x -= 1;
+            }
+            if x < y {
+                break;
+            }
+            let cf = (|| {
+                process_tile(y, 0)?;
+                process_tile(-y, 0)?;
+                process_tile(0, y)?;
+                process_tile(0, -y)?;
+                for i in 1..=x {
+                    process_tile(y, i)?;
+                    process_tile(-y, i)?;
+                    process_tile(y, -i)?;
+                    process_tile(-y, -i)?;
+                    process_tile(i, y)?;
+                    process_tile(i, -y)?;
+                    process_tile(-i, y)?;
+                    process_tile(-i, -y)?;
+                }
+                ControlFlow::Continue(())
+            })();
+            if let ControlFlow::Break(()) = cf {
+                break;
+            }
         }
     }
+    tile_hit_events.send_batch(hits.drain(..));
 }
 pub fn game_is_going(survivor_count: Res<SurvivorCount>) -> bool {
     survivor_count.0 > 1
@@ -964,6 +1097,7 @@ fn restart(
     mut survivors: ResMut<ParticipantMap<bool>>,
     mut turrets: ResMut<ParticipantMap<Entity>>,
     mut stopwatch: ResMut<TurretStopwatch>,
+    mut tile_grid: ResMut<TileGrid>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
     ball_mesh: Res<BulletMesh>,
     tile_root: Query<(Entity, &Children), With<TileRoot>>,
@@ -982,7 +1116,7 @@ fn restart(
     for &tile in tile_root_children.iter() {
         commands.entity(tile).despawn_recursive();
     }
-    setup_tiles(&mut commands, tile_root_entity);
+    setup_tiles(&mut commands, tile_root_entity, &mut tile_grid);
     *turrets = setup_turrets(
         &mut commands,
         root.single(),
