@@ -111,14 +111,22 @@ impl Plugin for PanelPlugin {
                 ),
             )
             .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()));
+        #[cfg(feature = "dev")]
+        {
+            app.register_type::<TriggerEvent>()
+                .register_type::<TriggerType>()
+                .register_type::<WorkerBallSpawner>();
+        }
     }
 }
 
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Event)]
 pub struct TriggerEvent {
     pub participant: Participant,
     pub trigger_type: TriggerType,
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Component, Clone, Copy)]
 pub enum TriggerType {
     Multiply(u8),
@@ -171,6 +179,7 @@ impl TriggerZoneBundle {
 #[derive(Component, Clone, Copy, Default)]
 /// Marker to mark this entity as a worker ball.
 pub struct WorkerBall;
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Resource, Clone, Default)]
 pub struct WorkerBallSpawner {
     mesh: Mesh2dHandle,

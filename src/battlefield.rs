@@ -102,16 +102,32 @@ impl Plugin for BattlefieldPlugin {
                         .after(handle_trigger_events),
                 ),
             );
+        #[cfg(feature = "dev")]
+        {
+            app.register_type::<EliminationEvent>()
+                .register_type::<TileHitEvent>()
+                .register_type::<SurvivorCount>()
+                .register_type::<TurretStopwatch>()
+                .register_type::<ChargeBallLink>()
+                .register_type::<BulletMesh>()
+                .register_type::<ShotType>()
+                .register_type::<Charge>()
+                .register_type::<Turret>()
+                .register_type::<TurretPlatformLink>()
+                .register_type::<BarrelOffset>();
+        }
     }
 }
 
 #[derive(Clone, Copy, Event, Default)]
 pub struct RestartEvent;
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Clone, Copy, Event)]
 pub struct EliminationEvent {
     pub participant: Participant,
 }
 #[cfg_attr(target_family = "wasm", allow(dead_code))]
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Clone, Copy, Event)]
 pub struct TileHitEvent {
     pub position: Vec3,
@@ -123,6 +139,7 @@ impl EliminationEvent {
         Self { participant }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Resource)]
 pub struct SurvivorCount(pub u8);
 impl Default for SurvivorCount {
@@ -202,6 +219,7 @@ impl TileBundle {
         }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Resource, Default, Clone)]
 struct TurretStopwatch(Stopwatch);
 impl TurretStopwatch {
@@ -209,8 +227,10 @@ impl TurretStopwatch {
         (self.0.elapsed_secs() * TURRET_ROTATION_SPEED) % (2.0 * PI)
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Component, Deref, Clone, Copy)]
 struct ChargeBallLink(Entity);
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Component, Clone, Copy)]
 struct Charge {
     value: u64,
@@ -276,6 +296,7 @@ impl ChargeBallBundle {
         }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Resource, Deref)]
 struct BulletMesh(Mesh2dHandle);
 #[derive(Clone, Copy, Component)]
@@ -375,11 +396,13 @@ impl BulletBundle {
         }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Clone, Copy)]
 enum ShotType {
     Charged,
     Multi,
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Component)]
 struct Turret {
     firing_queue: VecDeque<(ShotType, Charge)>,
@@ -472,9 +495,11 @@ impl TurretBarrelBundle {
         }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Clone, Copy, Component)]
 struct TurretPlatformLink(Entity);
 /// Component for a turret.
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Component, Default, Clone, Copy)]
 struct BarrelOffset {
     base_angle: f32,

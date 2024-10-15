@@ -18,10 +18,17 @@ pub struct ParticipantsPlugin;
 impl Plugin for ParticipantsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, setup);
+        #[cfg(feature = "dev")]
+        {
+            app.register_type::<Participant>()
+                .register_type::<ParticipantMap<bool>>()
+                .register_type::<ParticipantMap<ColorMaterial>>();
+        }
     }
 }
 
 /// A struct that maps a value to each participant.
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Clone, Copy, Default, Resource)]
 pub struct ParticipantMap<T> {
     // {{{
@@ -70,6 +77,7 @@ impl<T: Copy> ParticipantMap<T> {
         }
     }
 }
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Debug, Component, Clone, Copy, Default, PartialEq, Eq)]
 /// A game participant. It's not called player since the game is not interactive.
 pub enum Participant {

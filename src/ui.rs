@@ -19,6 +19,8 @@ impl Plugin for UIPlugin {
                 ),
             )
             .add_systems(PostUpdate, restart.run_if(on_event::<RestartEvent>()));
+        #[cfg(feature = "dev")]
+        app.register_type::<EliminationTextTimer>();
     }
 }
 
@@ -37,6 +39,7 @@ const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
 struct UIRoot;
 #[derive(Clone, Copy, Component)]
 struct RestartButton;
+#[cfg_attr(feature = "dev", derive(Reflect))]
 #[derive(Component)]
 struct EliminationTextTimer(Timer);
 #[derive(Bundle)]
