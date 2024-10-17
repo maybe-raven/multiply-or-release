@@ -1125,7 +1125,7 @@ fn restart(
     mut tile_grid: ResMut<TileGrid>,
     materials: Res<ParticipantMap<Handle<ColorMaterial>>>,
     ball_mesh: Res<BulletMesh>,
-    tile_root: Query<(Entity, &Children), With<TileRoot>>,
+    tile_root: Query<Entity, With<TileRoot>>,
     garbage: Query<Entity, Or<(With<Bullet>, With<NewBullet>, With<Turret>)>>,
     root: Query<Entity, With<BattlefieldRoot>>,
 ) {
@@ -1137,11 +1137,9 @@ fn restart(
     for entity in garbage.iter() {
         commands.entity(entity).despawn_recursive();
     }
-    let (tile_root_entity, tile_root_children) = tile_root.single();
-    for &tile in tile_root_children.iter() {
-        commands.entity(tile).despawn_recursive();
-    }
-    setup_tiles(&mut commands, tile_root_entity, &mut tile_grid);
+    let tile_root = tile_root.single();
+    commands.entity(tile_root).despawn_descendants();
+    setup_tiles(&mut commands, tile_root, &mut tile_grid);
     *turrets = setup_turrets(
         &mut commands,
         root.single(),
