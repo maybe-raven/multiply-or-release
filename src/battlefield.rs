@@ -15,10 +15,7 @@ use std::{
 
 // Constants {{{
 
-#[cfg(not(target_family = "wasm"))]
 const HALF_TILE_COUNT: usize = 100;
-#[cfg(target_family = "wasm")]
-const HALF_TILE_COUNT: usize = 69;
 const HALF_TILE_COUNT_I32: i32 = HALF_TILE_COUNT as i32;
 const TILE_COUNT: usize = HALF_TILE_COUNT * 2;
 const TILE_DIMENSION: f32 = BATTLEFIELD_HALF_WIDTH / HALF_TILE_COUNT as f32;
