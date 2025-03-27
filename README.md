@@ -19,9 +19,9 @@ https://github.com/user-attachments/assets/b6568097-09f6-4d65-9571-ae0c628ff452
 
 ### Building Locally
 
-1. Install Rust by following the [Rust Getting Started Guide](https://www.rust-lang.org/learn/get-startedA).
-2. Clone this repo `git clone --depth=1 https://github.com/maybe-raven/multiply-or-release`.
-3. Navigate to the directory then build and run with Cargo `cargo run --release`
+1. Install Rust and Cargo by following the [Rust Getting Started Guide](https://www.rust-lang.org/learn/get-started).
+2. ```cargo install --git https://github.com/maybe-raven/multiply-or-release```
+3. Run `multiply_or_release`
 
 > [!Warning]
 > I only have a MacBook so it's only tested on MacOS. I have no idea how well it'll fare on other operating systems.
@@ -30,7 +30,9 @@ https://github.com/user-attachments/assets/b6568097-09f6-4d65-9571-ae0c628ff452
 
 You can find this game on Itch.io [here](https://maybe-raven.itch.io/multiply-or-release).
 
-> [!Info] About Particle Effects
+> [!Note]
+> **About Particle Effects**
+> 
 > This game uses [`bevy_hanabi`](https://crates.io/crates/bevy_hanabi/0.12.2) for particle effects. However, the stable version of `bevy_hanabi` at the time didn't support WASM yet, so the web build will not have pretty visuals.
 
 I think they do have WASM support now. I'll update it at some point.
